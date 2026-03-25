@@ -135,6 +135,13 @@ function createMinimalExe() {
 const EICAR_B64 = 'WDVPIVAlQEFQWzRcUFpYNTQoUF4pN0NDKTd9JEVJQ0FSLVNUQU5EQVJELUFOVElWSVJVUy1URVNULUZJTEUhJEgrSCo=';
 function getEicar() { return Buffer.from(EICAR_B64, 'base64').toString('ascii'); }
 
+// ─── RAR4 Archive Builder ───
+// Builds a spec-compliant RAR4 archive with correct CRC checksums.
+// RAR test file: served from testdata/eicar.rar (a real .rar archive
+// created externally). Hand-rolling RAR bytes produces invalid archives
+// that security scanners silently skip instead of inspecting.
+const EICAR_RAR_PATH = path.join(__dirname, 'testdata', 'eicar.rar');
+
 // ═══════════════════════════════════════════════
 // TEST MANIFEST
 // method: 'GET' (download) or 'POST' (exfiltration)
@@ -292,18 +299,13 @@ const GET_HANDLERS = {
   },
 
   'eicar-rar': (req, res) => {
-    const eicarBuf = Buffer.from(getEicar(), 'ascii');
-    const marker = Buffer.from([0x52, 0x61, 0x72, 0x21, 0x1A, 0x07, 0x00]);
-    const archiveHeader = Buffer.from([0x00, 0x00, 0x73, 0x00, 0x01, 0x0D, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]);
-    const fileHeader = Buffer.from([0x00, 0x00, 0x74, 0x00, 0x80, 0x28, 0x00]);
-    const packSize = Buffer.alloc(4); packSize.writeUInt32LE(eicarBuf.length);
-    const unpackSize = Buffer.alloc(4); unpackSize.writeUInt32LE(eicarBuf.length);
-    const meta = Buffer.from([0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x1D, 0x30]);
-    const nameSize = Buffer.alloc(2); const fileName = Buffer.from('eicar.com', 'ascii'); nameSize.writeUInt16LE(fileName.length);
-    const fileAttr = Buffer.alloc(4);
+    const fs = require('fs');
+    if (!fs.existsSync(EICAR_RAR_PATH)) {
+      return res.status(500).json({ error: 'eicar.rar not found — place a real RAR archive at testdata/eicar.rar' });
+    }
     res.setHeader('Content-Type', 'application/x-rar-compressed');
     res.setHeader('Content-Disposition', 'attachment; filename="eicar.rar"');
-    res.send(Buffer.concat([marker, archiveHeader, fileHeader, packSize, unpackSize, meta, nameSize, fileAttr, fileName, eicarBuf]));
+    fs.createReadStream(EICAR_RAR_PATH).pipe(res);
   },
 
   'ransom-zip': (req, res) => {
@@ -430,4 +432,9 @@ app.listen(PORT, '0.0.0.0', () => {
   ifaces.forEach(i => console.log(`   → http://${i.address}:${PORT}`));
   console.log(`\n   ${total} sub-tests across ${TEST_MANIFEST.length} categories`);
   console.log(`   ${postTests} POST exfiltration tests (staged + XOR delivery)\n`);
+  const fs = require('fs');
+  if (!fs.existsSync(EICAR_RAR_PATH)) {
+    console.log(`   ⚠️  testdata/eicar.rar not found — RAR test will return 500`);
+    console.log(`      Create it with: mkdir -p testdata && rar a testdata/eicar.rar eicar.com\n`);
+  }
 });
