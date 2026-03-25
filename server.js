@@ -143,15 +143,161 @@ function createMinimalExe() {
 }
 
 // EICAR stored as base64 so it won't trigger scanners on the server file itself
-const EICAR_B64 = 'WDVPIVAlQEFQWzRcUFpYNTQoUF4pN0NDKTd9JEVJQ0FSLVNUQU5EQVJELUFOVElWSVJVUy1URVNULUZJTEUhJEgrSCo=';
+const EICAR_B64 = 'WDVPIVAlQEFQWzRcUFpYNTQoUF4pN0teleN0NDfSVJQ0FSLVNUQU5EQVJELUFOVElWSVJVUy1URVNULUZJTEUhJEgrSCo=';
 function getEicar() { return Buffer.from(EICAR_B64, 'base64').toString('ascii'); }
 
 // ─── RAR4 Archive Builder ───
-// Builds a spec-compliant RAR4 archive with correct CRC checksums.
-// RAR test file: served from testdata/eicar.rar (a real .rar archive
-// created externally). Hand-rolling RAR bytes produces invalid archives
-// that security scanners silently skip instead of inspecting.
 const EICAR_RAR_PATH = path.join(__dirname, 'testdata', 'eicar.rar');
+
+// ═══════════════════════════════════════════════
+// RANSOMWARE SIMULATION HELPERS
+// ═══════════════════════════════════════════════
+
+// Generate a fake BTC wallet address (valid Base58Check format, testnet prefix)
+function fakeBtcWallet() {
+  // Use a well-known burn address prefix so it's clearly fake
+  const chars = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+  let addr = '1FAKE';
+  for (let i = 0; i < 29; i++) addr += chars[Math.floor(Math.random() * chars.length)];
+  return addr;
+}
+
+// Random hex blob — simulates encrypted file content
+function randomBlob(size) {
+  const buf = Buffer.alloc(size);
+  for (let i = 0; i < size; i++) buf[i] = Math.floor(Math.random() * 256);
+  return buf;
+}
+
+// Victim ID that looks like real ransomware victim identifiers
+function victimId() {
+  return crypto.randomBytes(16).toString('hex').toUpperCase();
+}
+
+// Generate a realistic TXT ransom note
+function ransomNoteTxt() {
+  const wallet = fakeBtcWallet();
+  const vid = victimId();
+  return [
+    '╔══════════════════════════════════════════════════════════════╗',
+    '║              ALL YOUR FILES HAVE BEEN ENCRYPTED             ║',
+    '╚══════════════════════════════════════════════════════════════╝',
+    '',
+    'What happened?',
+    '─────────────',
+    'All your documents, photos, databases, and other important files',
+    'have been encrypted with military-grade AES-256 + RSA-4096.',
+    'No third-party decryption software can restore your files.',
+    '',
+    'How to recover?',
+    '───────────────',
+    'To decrypt your files you need to purchase our decryption tool.',
+    '',
+    `  Payment amount:  0.5 BTC`,
+    `  Bitcoin wallet:  ${wallet}`,
+    `  Victim ID:       ${vid}`,
+    '',
+    'After payment, email your victim ID and transaction hash to:',
+    '  ► decrypt_support@onionmail.org',
+    '  ► recovery_files@torbox36ijlcevujx7.onion',
+    '',
+    'WARNINGS:',
+    '  • Do NOT rename encrypted files — this will corrupt them.',
+    '  • Do NOT use third-party decryptors — they will destroy your key.',
+    '  • Do NOT contact law enforcement — they cannot help you and will',
+    '    only delay recovery.',
+    '  • You have 72 HOURS before the price doubles to 1.0 BTC.',
+    '  • After 7 days your decryption key will be permanently deleted.',
+    '',
+    `Encrypted on: ${new Date().toISOString()}`,
+    `System ID:    ${crypto.randomBytes(8).toString('hex')}`,
+    '',
+  ].join('\n');
+}
+
+// Generate an HTML ransom note (mimics .HTA dropper style)
+function ransomNoteHtml() {
+  const wallet = fakeBtcWallet();
+  const vid = victimId();
+  return `<!DOCTYPE html>
+<html>
+<head><title>YOUR FILES ARE ENCRYPTED</title>
+<style>
+  body { background: #1a0000; color: #ff3333; font-family: 'Courier New', monospace; padding: 40px; }
+  .container { max-width: 700px; margin: 0 auto; border: 2px solid #ff3333; padding: 30px; }
+  h1 { text-align: center; font-size: 28px; text-transform: uppercase; }
+  .warning { background: #330000; padding: 15px; margin: 20px 0; border-left: 4px solid #ff0000; }
+  .wallet { font-size: 14px; background: #000; padding: 10px; word-break: break-all; color: #ffcc00; }
+  .timer { text-align: center; font-size: 48px; color: #ff0000; margin: 20px 0; }
+  .vid { color: #00ff00; }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>⚠ YOUR FILES HAVE BEEN ENCRYPTED ⚠</h1>
+  <div class="timer" id="countdown">71:59:59</div>
+  <p>All your documents, databases, photos, and critical business files
+  have been encrypted with <strong>AES-256-CBC + RSA-4096</strong>.</p>
+
+  <div class="warning">
+    <strong>DO NOT:</strong>
+    <br>• Rename any .locked / .encrypted files
+    <br>• Run antivirus scans (they will quarantine your encrypted data)
+    <br>• Contact law enforcement (they will seize your machines)
+    <br>• Use third-party recovery tools (they corrupt the encryption headers)
+  </div>
+
+  <h2>Payment Instructions</h2>
+  <p>Send exactly <strong>0.5 BTC</strong> to:</p>
+  <div class="wallet">${wallet}</div>
+
+  <p>Then email your Victim ID and transaction hash to:</p>
+  <p>Primary: <strong>decrypt_support@onionmail.org</strong></p>
+  <p>Backup:  <strong>recover_files@dnmx.org</strong></p>
+
+  <p>Your Victim ID: <span class="vid">${vid}</span></p>
+
+  <div class="warning">
+    After 72 hours the ransom doubles to 1.0 BTC.<br>
+    After 7 days your private key is permanently destroyed.
+  </div>
+</div>
+<script>
+  // Countdown timer — typical ransomware pressure tactic
+  var deadline = Date.now() + 72*60*60*1000;
+  setInterval(function(){
+    var r = Math.max(0, deadline - Date.now());
+    var h = Math.floor(r/3600000), m = Math.floor((r%3600000)/60000), s = Math.floor((r%60000)/1000);
+    document.getElementById('countdown').textContent =
+      String(h).padStart(2,'0')+':'+String(m).padStart(2,'0')+':'+String(s).padStart(2,'0');
+  }, 1000);
+</script>
+</body>
+</html>`;
+}
+
+// Build a C2 beacon payload (JSON system fingerprint)
+function c2BeaconPayload() {
+  return JSON.stringify({
+    type: 'beacon',
+    victim_id: victimId(),
+    hostname: `DESKTOP-${crypto.randomBytes(3).toString('hex').toUpperCase()}`,
+    username: 'Administrator',
+    os: 'Windows 10 Pro 22H2 (19045.3930)',
+    arch: 'x64',
+    domain: 'CORPNET.local',
+    ip_internal: `10.${Math.floor(Math.random()*255)}.${Math.floor(Math.random()*255)}.${Math.floor(Math.random()*255)}`,
+    ip_external: `${Math.floor(Math.random()*223)+1}.${Math.floor(Math.random()*255)}.${Math.floor(Math.random()*255)}.${Math.floor(Math.random()*255)}`,
+    antivirus: ['Windows Defender', 'CrowdStrike Falcon'][Math.floor(Math.random()*2)],
+    av_disabled: true,
+    elevated: true,
+    encryption_key: crypto.randomBytes(32).toString('base64'),
+    files_encrypted: Math.floor(Math.random() * 50000) + 10000,
+    total_size_gb: +(Math.random() * 500 + 50).toFixed(1),
+    bitcoin_wallet: fakeBtcWallet(),
+    timestamp: new Date().toISOString(),
+  }, null, 2);
+}
 
 // ═══════════════════════════════════════════════
 // TEST MANIFEST
@@ -187,9 +333,13 @@ const TEST_MANIFEST = [
     id: 'ransomware',
     icon: 'lock',
     title: 'Ransomware Detection',
-    desc: 'Downloads an archive with ransom note, encrypted file extensions, and embedded malware test payload disguised as an executable.',
+    desc: 'Simulates a multi-stage ransomware attack: initial payload delivery, ransom notes (TXT and weaponized HTML/HTA), mass file encryption artifacts, C2 beacon callbacks, and double-extortion data theft. Each stage targets a different layer of the security stack.',
     subtests: [
-      { id: 'ransom-zip', label: 'Ransom Archive', method: 'GET', filename: 'urgent_invoice.zip' },
+      { id: 'ransom-archive',    label: 'Payload Archive',       method: 'GET',  filename: 'urgent_invoice.zip' },
+      { id: 'ransom-note-html',  label: 'HTML Ransom Note',      method: 'GET',  filename: 'DECRYPT_INSTRUCTIONS.html' },
+      { id: 'ransom-mass-crypt', label: 'Mass Encryption Sim',   method: 'GET',  filename: 'encrypted_files.zip' },
+      { id: 'ransom-c2-beacon',  label: 'C2 Beacon Callback',    method: 'POST', filename: 'telemetry.json' },
+      { id: 'ransom-dbl-extort', label: 'Double Extortion',      method: 'GET',  filename: 'stolen_data_sample.zip' },
     ]
   },
   {
@@ -245,6 +395,12 @@ const STAGE_GENERATORS = {
       csv += `"${name}",${email},${phone}\n`;
     });
     return { data: Buffer.from(csv, 'utf8'), contentType: 'text/csv', filename: 'exfiltrated_contacts.csv' };
+  },
+
+  // C2 beacon: ransomware phones home with system fingerprint + encryption key
+  'ransom-c2-beacon': () => {
+    const payload = c2BeaconPayload();
+    return { data: Buffer.from(payload, 'utf8'), contentType: 'application/json', filename: 'telemetry.json' };
   },
 };
 
@@ -326,17 +482,145 @@ const GET_HANDLERS = {
     });
   },
 
-  'ransom-zip': (req, res) => {
-    const note = `--- YOUR FILES HAVE BEEN ENCRYPTED ---\nPay 0.5 BTC to wallet: 1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa\nContact: decrypt_service@tormail.org\nID: ${Buffer.from(Date.now().toString()).toString('hex')}\n`;
-    const fakeEncrypted = Buffer.alloc(1024);
-    for (let i = 0; i < 1024; i++) fakeEncrypted[i] = Math.floor(Math.random() * 256);
+  // ─── RANSOMWARE: Stage 1 — Payload Archive ───
+  // Classic initial delivery: zip with ransom note, EICAR payload
+  // disguised as an exe, and a fake encrypted document.
+  // Tests: AV scanning inside archives, malicious filename detection.
+  'ransom-archive': (req, res) => {
+    const note = ransomNoteTxt();
+    const fakeEncrypted = randomBlob(2048);
+
     res.setHeader('Content-Type', 'application/zip');
     res.setHeader('Content-Disposition', 'attachment; filename="urgent_invoice.zip"');
     const archive = archiver('zip', { zlib: { level: 9 } });
     archive.pipe(res);
     archive.append(note, { name: 'README_DECRYPT.txt' });
-    archive.append(fakeEncrypted, { name: 'document.docx.encrypted' });
-    archive.append(getEicar(), { name: 'payload.exe' });
+    archive.append(fakeEncrypted, { name: 'invoice_2024.pdf.encrypted' });
+    archive.append(getEicar(), { name: 'decrypt_tool.exe' });
+    archive.append(createMinimalExe(), { name: 'WindowsUpdate.exe' });
+    archive.finalize();
+  },
+
+  // ─── RANSOMWARE: Stage 2 — HTML Ransom Note ───
+  // Standalone .html with countdown timer, BTC wallet, and threatening
+  // language. Mimics .HTA droppers that ransomware gangs leave behind.
+  // Tests: content-based threat detection, malicious HTML patterns.
+  'ransom-note-html': (req, res) => {
+    res.setHeader('Content-Type', 'text/html');
+    res.setHeader('Content-Disposition', 'attachment; filename="DECRYPT_INSTRUCTIONS.html"');
+    res.send(ransomNoteHtml());
+  },
+
+  // ─── RANSOMWARE: Stage 3 — Mass Encryption Simulation ───
+  // Archive containing 50+ files with ransomware-typical extensions
+  // (.locked, .encrypted, .crypted, .enc) across fake directory
+  // structures, plus the encryption key blob and a ransom note.
+  // Tests: heuristic detection of bulk encrypted file patterns.
+  'ransom-mass-crypt': (req, res) => {
+    const extensions = ['.locked', '.encrypted', '.crypted', '.enc', '.WNCRY', '.zepto', '.cerber'];
+    const dirs = ['Documents', 'Desktop', 'Pictures', 'Database', 'Finance', 'HR_Records'];
+    const fileTypes = ['.docx', '.xlsx', '.pdf', '.jpg', '.sql', '.pst', '.bak', '.mdb', '.csv', '.txt'];
+
+    res.setHeader('Content-Type', 'application/zip');
+    res.setHeader('Content-Disposition', 'attachment; filename="encrypted_files.zip"');
+    const archive = archiver('zip', { zlib: { level: 6 } });
+    archive.pipe(res);
+
+    // Ransom notes scattered in every directory (as real ransomware does)
+    dirs.forEach(dir => {
+      archive.append(ransomNoteTxt(), { name: `${dir}/README_DECRYPT.txt` });
+      archive.append(ransomNoteHtml(), { name: `${dir}/DECRYPT_INSTRUCTIONS.html` });
+    });
+
+    // 50 fake encrypted files across directories
+    for (let i = 0; i < 50; i++) {
+      const dir = dirs[i % dirs.length];
+      const base = `file_${String(i + 1).padStart(3, '0')}${fileTypes[i % fileTypes.length]}`;
+      const ext = extensions[i % extensions.length];
+      // Vary sizes: small docs to larger DB dumps
+      const size = 512 + Math.floor(Math.random() * 4096);
+      archive.append(randomBlob(size), { name: `${dir}/${base}${ext}` });
+    }
+
+    // Encryption key blob — what ransomware stores locally before exfil
+    const keyBlob = JSON.stringify({
+      algorithm: 'AES-256-CBC',
+      rsa_public_key: `-----BEGIN PUBLIC KEY-----\n${crypto.randomBytes(256).toString('base64').match(/.{1,64}/g).join('\n')}\n-----END PUBLIC KEY-----`,
+      encrypted_aes_key: crypto.randomBytes(256).toString('base64'),
+      iv: crypto.randomBytes(16).toString('hex'),
+      victim_id: victimId(),
+      files_encrypted: 50,
+      timestamp: new Date().toISOString(),
+    }, null, 2);
+    archive.append(keyBlob, { name: 'encryption_metadata.json' });
+
+    archive.finalize();
+  },
+
+  // ─── RANSOMWARE: Stage 5 — Double Extortion ───
+  // Archive containing "stolen" data samples (fake PII, financial
+  // records) plus a threat note about public data leakage.
+  // Tests: DLP for bulk PII, exfiltration pattern detection.
+  'ransom-dbl-extort': (req, res) => {
+    const emails = generateEmails(50);
+    const cards = generateCreditCards(10);
+
+    // Stolen employee records
+    let employeeCsv = 'Full Name,Email,SSN,Salary,Department\n';
+    emails.slice(0, 30).forEach(email => {
+      const name = email.split('@')[0].replace(/[._]/g, ' ');
+      const ssn = `${Math.floor(Math.random() * 900) + 100}-${Math.floor(Math.random() * 90) + 10}-${Math.floor(Math.random() * 9000) + 1000}`;
+      const salary = `$${(Math.floor(Math.random() * 150) + 50) * 1000}`;
+      const depts = ['Engineering', 'Finance', 'HR', 'Legal', 'Sales', 'Executive'];
+      employeeCsv += `"${name}",${email},${ssn},${salary},${depts[Math.floor(Math.random() * depts.length)]}\n`;
+    });
+
+    // Stolen payment data
+    let paymentCsv = 'Customer,Card Type,Card Number,Expiry,CVV\n';
+    cards.forEach(c => {
+      const name = `Customer ${Math.floor(Math.random() * 9000) + 1000}`;
+      paymentCsv += `"${name}",${c.type},${c.number},${c.expiry},${c.cvv}\n`;
+    });
+
+    // Extortion note
+    const extortionNote = [
+      '═══════════════════════════════════════════════════════════',
+      '  NOTICE: YOUR COMPANY DATA HAS BEEN DOWNLOADED',
+      '═══════════════════════════════════════════════════════════',
+      '',
+      'We have exfiltrated the following from your network:',
+      '',
+      `  • ${30} employee records (SSN, salary, contact info)`,
+      `  • ${10} customer payment cards`,
+      '  • Financial reports (Q1–Q4)',
+      '  • Executive email archives',
+      '  • Source code repositories',
+      '',
+      'SAMPLES ARE INCLUDED IN THIS ARCHIVE AS PROOF.',
+      '',
+      'If payment is not received within 72 hours, we will:',
+      '  1. Publish all data on our leak site',
+      '  2. Notify your customers of the breach',
+      '  3. Forward data to regulatory authorities',
+      '  4. Sell remaining data on darknet markets',
+      '',
+      `  Payment:    1.0 BTC`,
+      `  Wallet:     ${fakeBtcWallet()}`,
+      `  Victim ID:  ${victimId()}`,
+      `  Contact:    leaks_negotiation@onionmail.org`,
+      '',
+      'This is not a bluff. The clock is ticking.',
+      '',
+    ].join('\n');
+
+    res.setHeader('Content-Type', 'application/zip');
+    res.setHeader('Content-Disposition', 'attachment; filename="stolen_data_sample.zip"');
+    const archive = archiver('zip', { zlib: { level: 9 } });
+    archive.pipe(res);
+    archive.append(extortionNote, { name: 'READ_ME_OR_ELSE.txt' });
+    archive.append(employeeCsv, { name: 'proof/employee_records_sample.csv' });
+    archive.append(paymentCsv, { name: 'proof/payment_cards_sample.csv' });
+    archive.append(ransomNoteHtml(), { name: 'DECRYPT_INSTRUCTIONS.html' });
     archive.finalize();
   },
 
@@ -405,9 +689,6 @@ app.get('/api/stage/:subtestId', (req, res) => {
 });
 
 // ─── RUN endpoint for GET tests ───
-// Two routes: with and without trailing filename. The filename variant
-// (e.g. /api/run/eicar-rar/eicar.rar) lets firewalls that inspect the
-// URL file extension decide which content scanner to engage.
 function handleGetRun(req, res) {
   const handler = GET_HANDLERS[req.params.subtestId];
   if (!handler) return res.status(404).json({ error: 'Unknown subtest or wrong method (use POST)' });
@@ -417,15 +698,12 @@ app.get('/api/run/:subtestId/:filename', handleGetRun);
 app.get('/api/run/:subtestId', handleGetRun);
 
 // ─── RUN endpoint for POST tests ───
-// Expects cleartext payload in the request body.
-// If the DLP/proxy lets this through, the test FAILS.
 function handlePostRun(req, res) {
   const validPostTests = Object.keys(STAGE_GENERATORS);
   if (!validPostTests.includes(req.params.subtestId)) {
     return res.status(404).json({ error: 'Unknown POST subtest' });
   }
 
-  // If we got here, the cleartext POST was NOT blocked
   const size = req.headers['content-length'] || '0';
   res.json({
     received: true,
@@ -440,7 +718,7 @@ app.post('/api/run/:subtestId', handlePostRun);
 app.get('/api/health', (req, res) => {
   const total = TEST_MANIFEST.reduce((sum, t) => sum + t.subtests.length, 0);
   const postTests = TEST_MANIFEST.reduce((sum, t) => sum + t.subtests.filter(s => s.method === 'POST').length, 0);
-  res.json({ status: 'ok', version: '3.0.0', categories: TEST_MANIFEST.length, subtests: total, postTests });
+  res.json({ status: 'ok', version: '3.1.0', categories: TEST_MANIFEST.length, subtests: total, postTests });
 });
 
 // ═══════════════════════════════════════════════
@@ -452,7 +730,7 @@ app.listen(PORT, '0.0.0.0', () => {
   const ifaces = Object.values(os.networkInterfaces()).flat().filter(i => i.family === 'IPv4' && !i.internal);
   const total = TEST_MANIFEST.reduce((sum, t) => sum + t.subtests.length, 0);
   const postTests = TEST_MANIFEST.reduce((sum, t) => sum + t.subtests.filter(s => s.method === 'POST').length, 0);
-  console.log(`\n🛡️  Threat Exposure Test Server v3.0`);
+  console.log(`\n🛡️  Threat Exposure Test Server v3.1`);
   console.log(`   → http://localhost:${PORT}`);
   ifaces.forEach(i => console.log(`   → http://${i.address}:${PORT}`));
   console.log(`\n   ${total} sub-tests across ${TEST_MANIFEST.length} categories`);
