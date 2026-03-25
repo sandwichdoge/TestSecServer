@@ -2,13 +2,37 @@ const express = require('express');
 const archiver = require('archiver');
 const path = require('path');
 const { Buffer } = require('buffer');
+const crypto = require('crypto');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-app.use(express.json({ limit: '1mb' }));
-app.use(express.urlencoded({ extended: true, limit: '1mb' }));
+app.use(express.json({ limit: '2mb' }));
+app.use(express.urlencoded({ extended: true, limit: '2mb' }));
+app.use(express.raw({ type: 'text/csv', limit: '2mb' }));
+app.use(express.raw({ type: 'application/octet-stream', limit: '2mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
+
+// ═══════════════════════════════════════════════
+// XOR OBFUSCATION — keeps staged payloads opaque
+// to inline content scanners during transit to
+// the client. The client decodes, then POSTs
+// cleartext so the security stack can inspect it.
+// ═══════════════════════════════════════════════
+
+function xorEncode(buf, key) {
+  const keyBuf = Buffer.from(key, 'utf8');
+  const out = Buffer.alloc(buf.length);
+  for (let i = 0; i < buf.length; i++) {
+    out[i] = buf[i] ^ keyBuf[i % keyBuf.length];
+  }
+  return out;
+}
+
+// Per-session rotating key so the encoded blob is never the same twice
+function generateKey() {
+  return crypto.randomBytes(16).toString('hex');
+}
 
 // ═══════════════════════════════════════════════
 // DATA GENERATORS (all sensitive data lives here)
@@ -112,8 +136,8 @@ const EICAR_B64 = 'WDVPIVAlQEFQWzRcUFpYNTQoUF4pN0NDKTd9JEVJQ0FSLVNUQU5EQVJELUFOV
 function getEicar() { return Buffer.from(EICAR_B64, 'base64').toString('ascii'); }
 
 // ═══════════════════════════════════════════════
-// TEST MANIFEST — display metadata only
-// No URLs, no payloads, no sensitive strings
+// TEST MANIFEST
+// method: 'GET' (download) or 'POST' (exfiltration)
 // ═══════════════════════════════════════════════
 
 const TEST_MANIFEST = [
@@ -123,10 +147,10 @@ const TEST_MANIFEST = [
     title: 'Credit Card Exfiltration',
     desc: 'Attempts to exfiltrate Luhn-valid credit card numbers (Visa, Mastercard, Amex, Discover, JCB, Diners) via multiple data formats and transport methods.',
     subtests: [
-      { id: 'cc-csv',    label: 'CSV Download' },
-      { id: 'cc-json',   label: 'JSON API' },
-      { id: 'cc-post',   label: 'POST Upload' },
-      { id: 'cc-hidden', label: 'Hidden HTML' },
+      { id: 'cc-csv',    label: 'CSV Download',  method: 'GET'  },
+      { id: 'cc-json',   label: 'JSON API',       method: 'GET'  },
+      { id: 'cc-post',   label: 'POST Upload',    method: 'POST' },
+      { id: 'cc-hidden', label: 'Hidden HTML',    method: 'GET'  },
     ]
   },
   {
@@ -135,10 +159,10 @@ const TEST_MANIFEST = [
     title: 'Antivirus Detection',
     desc: 'Downloads the industry-standard antivirus test file in various archive formats. Scanners should detect the signature even inside compressed archives.',
     subtests: [
-      { id: 'eicar-plain',  label: 'Plain File' },
-      { id: 'eicar-zip',    label: 'Zipped' },
-      { id: 'eicar-dblzip', label: 'Double-Zipped' },
-      { id: 'eicar-rar',    label: 'RAR Archive' },
+      { id: 'eicar-plain',  label: 'Plain File',     method: 'GET' },
+      { id: 'eicar-zip',    label: 'Zipped',          method: 'GET' },
+      { id: 'eicar-dblzip', label: 'Double-Zipped',   method: 'GET' },
+      { id: 'eicar-rar',    label: 'RAR Archive',     method: 'GET' },
     ]
   },
   {
@@ -147,7 +171,7 @@ const TEST_MANIFEST = [
     title: 'Ransomware Detection',
     desc: 'Downloads an archive with ransom note, encrypted file extensions, and embedded malware test payload disguised as an executable.',
     subtests: [
-      { id: 'ransom-zip', label: 'Ransom Archive' },
+      { id: 'ransom-zip', label: 'Ransom Archive', method: 'GET' },
     ]
   },
   {
@@ -156,7 +180,7 @@ const TEST_MANIFEST = [
     title: 'Executable Download',
     desc: 'Attempts to download a PE32 executable file. Security policies should block executable downloads from untrusted sources.',
     subtests: [
-      { id: 'exe-dl', label: 'PE32 Binary' },
+      { id: 'exe-dl', label: 'PE32 Binary', method: 'GET' },
     ]
   },
   {
@@ -165,8 +189,8 @@ const TEST_MANIFEST = [
     title: 'Mass Email Exfiltration',
     desc: 'Attempts to exfiltrate 150+ email addresses with associated PII data via file download and upload methods.',
     subtests: [
-      { id: 'email-dl',   label: 'CSV Download' },
-      { id: 'email-post', label: 'POST Upload' },
+      { id: 'email-dl',   label: 'CSV Download',  method: 'GET'  },
+      { id: 'email-post', label: 'POST Upload',   method: 'POST' },
     ]
   },
   {
@@ -175,18 +199,42 @@ const TEST_MANIFEST = [
     title: 'Cross-Site Scripting',
     desc: 'Loads pages with reflected and DOM-based injection vectors. Security proxies should strip or neutralize these patterns.',
     subtests: [
-      { id: 'xss-reflect', label: 'Reflected XSS' },
-      { id: 'xss-payload', label: 'Multi-Vector XSS' },
+      { id: 'xss-reflect', label: 'Reflected XSS',    method: 'GET' },
+      { id: 'xss-payload', label: 'Multi-Vector XSS',  method: 'GET' },
     ]
   },
 ];
 
 // ═══════════════════════════════════════════════
-// SUBTEST HANDLERS — each generates its payload
-// on demand when the test actually runs
+// PAYLOAD GENERATORS for POST staging
+// Returns raw cleartext Buffer for a given subtest
 // ═══════════════════════════════════════════════
 
-const SUBTEST_HANDLERS = {
+const STAGE_GENERATORS = {
+  'cc-post': () => {
+    const cards = generateCreditCards(25);
+    let csv = 'Card Number,Expiry,CVV\n';
+    cards.forEach(c => { csv += `${c.number},${c.expiry},${c.cvv}\n`; });
+    return { data: Buffer.from(csv, 'utf8'), contentType: 'text/csv', filename: 'exfiltrated_cards.csv' };
+  },
+
+  'email-post': () => {
+    const emails = generateEmails(150);
+    let csv = 'Name,Email,Phone\n';
+    emails.forEach(email => {
+      const name = email.split('@')[0].replace(/[._]/g, ' ');
+      const phone = `(${Math.floor(Math.random() * 900) + 100}) ${Math.floor(Math.random() * 900) + 100}-${Math.floor(Math.random() * 9000) + 1000}`;
+      csv += `"${name}",${email},${phone}\n`;
+    });
+    return { data: Buffer.from(csv, 'utf8'), contentType: 'text/csv', filename: 'exfiltrated_contacts.csv' };
+  },
+};
+
+// ═══════════════════════════════════════════════
+// SUBTEST HANDLERS — GET tests (downloads)
+// ═══════════════════════════════════════════════
+
+const GET_HANDLERS = {
   'cc-csv': (req, res) => {
     const cards = generateCreditCards(25);
     let csv = 'Card Type,Card Number,Expiry,CVV\n';
@@ -198,15 +246,6 @@ const SUBTEST_HANDLERS = {
 
   'cc-json': (req, res) => {
     res.json({ customer_payment_data: generateCreditCards(25) });
-  },
-
-  'cc-post': (req, res) => {
-    const cards = generateCreditCards(25);
-    let csv = 'Card Number,Expiry,CVV\n';
-    cards.forEach(c => { csv += `${c.number},${c.expiry},${c.cvv}\n`; });
-    res.setHeader('Content-Type', 'text/csv');
-    res.setHeader('Content-Disposition', 'attachment; filename="exfiltrated_cards.csv"');
-    res.send(csv);
   },
 
   'cc-hidden': (req, res) => {
@@ -301,19 +340,6 @@ const SUBTEST_HANDLERS = {
     res.send(csv);
   },
 
-  'email-post': (req, res) => {
-    const emails = generateEmails(150);
-    let csv = 'Name,Email,Phone\n';
-    emails.forEach(email => {
-      const name = email.split('@')[0].replace(/[._]/g, ' ');
-      const phone = `(${Math.floor(Math.random() * 900) + 100}) ${Math.floor(Math.random() * 900) + 100}-${Math.floor(Math.random() * 9000) + 1000}`;
-      csv += `"${name}",${email},${phone}\n`;
-    });
-    res.setHeader('Content-Type', 'text/csv');
-    res.setHeader('Content-Disposition', 'attachment; filename="exfiltrated_contacts.csv"');
-    res.send(csv);
-  },
-
   'xss-reflect': (req, res) => {
     const payload = Buffer.from('PHNjcmlwdD5hbGVydCgiWFNTIik8L3NjcmlwdD4=', 'base64').toString();
     res.setHeader('Content-Type', 'text/html');
@@ -343,17 +369,51 @@ app.get('/api/manifest', (req, res) => {
   res.json(TEST_MANIFEST);
 });
 
-// Single endpoint for ALL test execution
-// Client calls: GET /api/run/cc-csv, GET /api/run/eicar-plain, etc.
+// ─── STAGE endpoint ───
+// Returns XOR-encoded + base64 payload so the delivery
+// to the browser doesn't trigger DLP/AV inline scanners.
+// The client decodes in JS memory, then POSTs cleartext.
+app.get('/api/stage/:subtestId', (req, res) => {
+  const generator = STAGE_GENERATORS[req.params.subtestId];
+  if (!generator) return res.status(404).json({ error: 'No staging available for this subtest' });
+
+  const key = generateKey();
+  const { data, contentType, filename } = generator();
+  const encoded = xorEncode(data, key).toString('base64');
+
+  res.json({ key, encoded, contentType, filename });
+});
+
+// ─── RUN endpoint for GET tests ───
 app.get('/api/run/:subtestId', (req, res) => {
-  const handler = SUBTEST_HANDLERS[req.params.subtestId];
-  if (!handler) return res.status(404).json({ error: 'Unknown subtest' });
+  const handler = GET_HANDLERS[req.params.subtestId];
+  if (!handler) return res.status(404).json({ error: 'Unknown subtest or wrong method (use POST)' });
   handler(req, res);
+});
+
+// ─── RUN endpoint for POST tests ───
+// Expects cleartext payload in the request body.
+// If the DLP/proxy lets this through, the test FAILS.
+app.post('/api/run/:subtestId', (req, res) => {
+  const validPostTests = Object.keys(STAGE_GENERATORS);
+  if (!validPostTests.includes(req.params.subtestId)) {
+    return res.status(404).json({ error: 'Unknown POST subtest' });
+  }
+
+  // If we got here, the cleartext POST was NOT blocked
+  const size = req.headers['content-length'] || '0';
+  res.json({
+    received: true,
+    subtestId: req.params.subtestId,
+    bytes: parseInt(size, 10),
+    message: 'Payload received — DLP did not block this exfiltration attempt',
+  });
 });
 
 app.get('/api/health', (req, res) => {
   const total = TEST_MANIFEST.reduce((sum, t) => sum + t.subtests.length, 0);
-  res.json({ status: 'ok', version: '2.0.0', categories: TEST_MANIFEST.length, subtests: total });
+  const postTests = TEST_MANIFEST.reduce((sum, t) => sum + t.subtests.filter(s => s.method === 'POST').length, 0);
+  res.json({ status: 'ok', version: '3.0.0', categories: TEST_MANIFEST.length, subtests: total, postTests });
 });
 
 // ═══════════════════════════════════════════════
@@ -364,8 +424,10 @@ app.listen(PORT, '0.0.0.0', () => {
   const os = require('os');
   const ifaces = Object.values(os.networkInterfaces()).flat().filter(i => i.family === 'IPv4' && !i.internal);
   const total = TEST_MANIFEST.reduce((sum, t) => sum + t.subtests.length, 0);
-  console.log(`\n🛡️  Threat Exposure Test Server v2.0`);
+  const postTests = TEST_MANIFEST.reduce((sum, t) => sum + t.subtests.filter(s => s.method === 'POST').length, 0);
+  console.log(`\n🛡️  Threat Exposure Test Server v3.0`);
   console.log(`   → http://localhost:${PORT}`);
   ifaces.forEach(i => console.log(`   → http://${i.address}:${PORT}`));
-  console.log(`\n   ${total} sub-tests across ${TEST_MANIFEST.length} categories\n`);
+  console.log(`\n   ${total} sub-tests across ${TEST_MANIFEST.length} categories`);
+  console.log(`   ${postTests} POST exfiltration tests (staged + XOR delivery)\n`);
 });

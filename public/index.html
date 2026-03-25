@@ -24,6 +24,8 @@
     --accent-amber-dim: rgba(245, 158, 11, 0.15);
     --accent-blue: #3b82f6;
     --accent-blue-dim: rgba(59, 130, 246, 0.12);
+    --accent-purple: #a855f7;
+    --accent-purple-dim: rgba(168, 85, 247, 0.15);
     --radius: 12px;
     --radius-sm: 8px;
   }
@@ -66,66 +68,38 @@
   .header { text-align: center; margin-bottom: 48px; }
 
   .header-badge {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    padding: 6px 16px;
-    border-radius: 100px;
-    border: 1px solid var(--border);
-    background: var(--accent-blue-dim);
-    font-size: 12px;
-    font-weight: 600;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    color: var(--accent-blue);
-    margin-bottom: 20px;
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 6px 16px; border-radius: 100px;
+    border: 1px solid var(--border); background: var(--accent-blue-dim);
+    font-size: 12px; font-weight: 600; letter-spacing: 0.08em;
+    text-transform: uppercase; color: var(--accent-blue); margin-bottom: 20px;
   }
 
   .header-badge::before {
-    content: '';
-    width: 6px; height: 6px;
-    border-radius: 50%;
-    background: var(--accent-blue);
-    box-shadow: 0 0 8px var(--accent-blue);
+    content: ''; width: 6px; height: 6px; border-radius: 50%;
+    background: var(--accent-blue); box-shadow: 0 0 8px var(--accent-blue);
     animation: pulse-dot 2s ease-in-out infinite;
   }
 
-  @keyframes pulse-dot {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.4; }
-  }
+  @keyframes pulse-dot { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
 
   h1 {
-    font-size: clamp(28px, 4vw, 42px);
-    font-weight: 800;
-    letter-spacing: -0.03em;
-    line-height: 1.1;
-    margin-bottom: 12px;
+    font-size: clamp(28px, 4vw, 42px); font-weight: 800;
+    letter-spacing: -0.03em; line-height: 1.1; margin-bottom: 12px;
     background: linear-gradient(135deg, #e2e8f0 0%, #94a3b8 100%);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
   }
 
   .header p {
-    color: var(--text-secondary);
-    font-size: 15px;
-    max-width: 600px;
-    margin: 0 auto 28px;
-    line-height: 1.6;
+    color: var(--text-secondary); font-size: 15px;
+    max-width: 600px; margin: 0 auto 28px; line-height: 1.6;
   }
 
-  /* ─── Score Dashboard ─── */
   .dashboard {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 32px;
-    padding: 24px;
-    border-radius: var(--radius);
-    border: 1px solid var(--border);
-    background: var(--bg-card);
-    margin-bottom: 40px;
-    flex-wrap: wrap;
+    display: flex; align-items: center; justify-content: center;
+    gap: 32px; padding: 24px; border-radius: var(--radius);
+    border: 1px solid var(--border); background: var(--bg-card);
+    margin-bottom: 40px; flex-wrap: wrap;
   }
 
   .score-ring { position: relative; width: 100px; height: 100px; flex-shrink: 0; }
@@ -134,8 +108,7 @@
   .score-ring .track { stroke: var(--border); }
   .score-ring .progress { stroke: var(--accent-blue); transition: stroke-dashoffset 0.8s ease, stroke 0.4s ease; }
   .score-ring .label {
-    position: absolute; inset: 0;
-    display: flex; flex-direction: column;
+    position: absolute; inset: 0; display: flex; flex-direction: column;
     align-items: center; justify-content: center;
     font-family: 'JetBrains Mono', monospace;
   }
@@ -150,7 +123,6 @@
   .stat-val.exposed { color: var(--accent-red); }
   .stat-val.pending { color: var(--text-muted); }
 
-  /* ─── Controls ─── */
   .controls { display: flex; justify-content: center; gap: 12px; margin-bottom: 36px; }
 
   .btn {
@@ -165,12 +137,12 @@
   .btn-primary:hover { background: #2563eb; border-color: #2563eb; box-shadow: 0 0 24px rgba(59, 130, 246, 0.3); }
   .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; box-shadow: none; }
 
-  /* ─── Test Grid ─── */
   .test-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 16px; }
 
   .test-card {
     position: relative; padding: 24px; border-radius: var(--radius);
-    border: 1px solid var(--border); background: var(--bg-card); transition: all 0.3s; overflow: hidden;
+    border: 1px solid var(--border); background: var(--bg-card);
+    transition: all 0.3s; overflow: hidden;
   }
   .test-card::before {
     content: ''; position: absolute; top: 0; left: 0; right: 0;
@@ -219,7 +191,14 @@
   .subtest.running { background: var(--accent-amber-dim); color: var(--accent-amber); }
   .subtest-icon { font-size: 10px; }
 
-  /* ─── Info Banner ─── */
+  .method-badge {
+    display: inline-block; padding: 1px 4px; border-radius: 3px;
+    font-size: 9px; font-weight: 700; letter-spacing: 0.04em;
+    vertical-align: middle; margin-left: 2px;
+  }
+  .method-get  { background: rgba(59,130,246,0.15); color: var(--accent-blue); }
+  .method-post { background: var(--accent-purple-dim); color: var(--accent-purple); }
+
   .info-banner {
     margin-top: 40px; padding: 20px 24px; border-radius: var(--radius);
     border: 1px solid rgba(59,130,246,0.2); background: var(--accent-blue-dim);
@@ -249,7 +228,7 @@
   <div class="header">
     <div class="header-badge">Internet Threat Exposure</div>
     <h1>Security Test Suite</h1>
-    <p>Tests whether your network security stack (proxy, firewall, DLP, antivirus) blocks common threats. Each test attempts something malicious — if it's <strong>blocked</strong>, you're protected.</p>
+    <p>Tests whether your network security stack (proxy, firewall, DLP, antivirus) blocks common threats. Each test attempts something malicious &mdash; if it's <strong>blocked</strong>, you're protected.</p>
   </div>
 
   <div class="dashboard">
@@ -296,7 +275,7 @@
   <div class="info-banner">
     <span class="info-icon">&#8505;&#65039;</span>
     <div>
-      <strong>How it works:</strong> Each test fetches a server-generated payload through your network. If your security infrastructure (web proxy, next-gen firewall, DLP, antivirus) intercepts and blocks the request, the test <strong>passes</strong>. A failed test means that threat type could reach your network undetected. No actual malware is used — all payloads are inert test patterns.
+      <strong>How it works:</strong> <strong>GET</strong> tests attempt to download malicious payloads &mdash; your security stack should block the response. <strong>POST</strong> tests receive an encoded payload from the server, decode it in-browser, then attempt to upload the cleartext sensitive data &mdash; your DLP should block the outbound exfiltration. No actual malware is used; all payloads are inert test patterns.
     </div>
   </div>
 
@@ -308,10 +287,12 @@
 <script>
 // ═══════════════════════════════════════════════════════
 // CLIENT — contains ZERO test payloads, URLs, or
-// sensitive data. All test logic lives on the server.
+// sensitive data. POST payloads are fetched from the
+// server via XOR-encoded staging, decoded in memory,
+// then POSTed as cleartext for DLP inspection.
 // ═══════════════════════════════════════════════════════
 
-const ICON_MAP = {
+var ICON_MAP = {
   'credit-card': '\uD83D\uDCB3',
   'virus':       '\uD83E\uDDA0',
   'lock':        '\uD83D\uDD10',
@@ -320,13 +301,37 @@ const ICON_MAP = {
   'code':        '\uD83D\uDD77\uFE0F',
 };
 
-let manifest = [];
-let results = {};
+var manifest = [];
+var results = {};
+
+// Build a lookup: subtestId -> method from manifest
+var subtestMethods = {};
+
+// ─── XOR Decode ───
+// Mirrors the server-side xorEncode. Key + base64 blob
+// arrive via /api/stage, decoded here to cleartext.
+function xorDecode(base64Str, key) {
+  var raw = atob(base64Str);
+  var keyBytes = [];
+  for (var i = 0; i < key.length; i++) keyBytes.push(key.charCodeAt(i));
+  var out = new Uint8Array(raw.length);
+  for (var i = 0; i < raw.length; i++) {
+    out[i] = raw.charCodeAt(i) ^ keyBytes[i % keyBytes.length];
+  }
+  // Convert Uint8Array to string (UTF-8 text payloads)
+  return new TextDecoder().decode(out);
+}
 
 async function loadManifest() {
   try {
-    const res = await fetch('/api/manifest');
+    var res = await fetch('/api/manifest');
     manifest = await res.json();
+    // Build method lookup
+    manifest.forEach(function(test) {
+      test.subtests.forEach(function(st) {
+        subtestMethods[st.id] = st.method || 'GET';
+      });
+    });
     renderCards();
     updateDashboard();
   } catch (e) {
@@ -336,25 +341,25 @@ async function loadManifest() {
 }
 
 function getSubtestCount() {
-  return manifest.reduce((sum, t) => sum + t.subtests.length, 0);
+  return manifest.reduce(function(sum, t) { return sum + t.subtests.length; }, 0);
 }
 
 // ─── Render ───
 
 function renderCards() {
-  const grid = document.getElementById('testGrid');
+  var grid = document.getElementById('testGrid');
   grid.innerHTML = '';
-  manifest.forEach(test => {
-    const cardState = getCardState(test);
-    const card = document.createElement('div');
+  manifest.forEach(function(test) {
+    var cardState = getCardState(test);
+    var card = document.createElement('div');
     card.className = 'test-card ' + cardState;
-    const statusClass = cardState === 'pass' ? 'status-pass' :
-                        cardState === 'fail' ? 'status-fail' :
-                        cardState === 'running' ? 'status-running' : 'status-idle';
-    const statusText = cardState === 'pass' ? 'Protected' :
-                       cardState === 'fail' ? 'Exposed' :
-                       cardState === 'running' ? 'Testing' : 'Ready';
-    const icon = ICON_MAP[test.icon] || '\uD83D\uDD12';
+    var statusClass = cardState === 'pass' ? 'status-pass' :
+                      cardState === 'fail' ? 'status-fail' :
+                      cardState === 'running' ? 'status-running' : 'status-idle';
+    var statusText = cardState === 'pass' ? 'Protected' :
+                     cardState === 'fail' ? 'Exposed' :
+                     cardState === 'running' ? 'Testing' : 'Ready';
+    var icon = ICON_MAP[test.icon] || '\uD83D\uDD12';
     card.innerHTML =
       '<div class="card-top">' +
         '<div class="card-icon">' + icon + '</div>' +
@@ -368,7 +373,9 @@ function renderCards() {
         test.subtests.map(function(st) {
           var state = results[st.id] || 'idle';
           var ic = state === 'pass' ? '\u2713' : state === 'fail' ? '\u2717' : state === 'running' ? '\u25CC' : '\u00B7';
-          return '<span class="subtest ' + state + '"><span class="subtest-icon">' + ic + '</span> ' + st.label + '</span>';
+          var method = st.method || 'GET';
+          var methodBadge = '<span class="method-badge method-' + method.toLowerCase() + '">' + method + '</span>';
+          return '<span class="subtest ' + state + '"><span class="subtest-icon">' + ic + '</span> ' + st.label + ' ' + methodBadge + '</span>';
         }).join('') +
       '</div>';
     grid.appendChild(card);
@@ -414,13 +421,9 @@ function updateDashboard() {
 }
 
 // ─── Test Execution ───
-// The ONLY URL the client ever constructs is /api/run/{subtestId}
 
-async function runSubtest(subtestId) {
-  results[subtestId] = 'running';
-  renderCards();
-  updateDashboard();
-
+// GET test: try to download payload. If blocked → pass.
+async function runGetSubtest(subtestId) {
   var controller = new AbortController();
   var timeout = setTimeout(function() { controller.abort(); }, 15000);
 
@@ -432,14 +435,76 @@ async function runSubtest(subtestId) {
     });
     clearTimeout(timeout);
     if (response.ok) {
-      await response.arrayBuffer();
-      results[subtestId] = 'fail';
+      await response.arrayBuffer(); // consume body
+      return 'fail'; // payload came through unblocked
     } else {
-      results[subtestId] = 'pass';
+      return 'pass'; // server/proxy rejected it
     }
   } catch (err) {
     clearTimeout(timeout);
-    results[subtestId] = 'pass';
+    return 'pass'; // network blocked it
+  }
+}
+
+// POST test: two-phase flow
+// 1. GET /api/stage/:id → { key, encoded, contentType, filename }
+//    The response is XOR + base64, opaque to inline scanners
+// 2. Decode in JS memory → cleartext sensitive data
+// 3. POST cleartext to /api/run/:id
+//    DLP/proxy should catch this outbound exfiltration
+async function runPostSubtest(subtestId) {
+  var controller = new AbortController();
+  var timeout = setTimeout(function() { controller.abort(); }, 20000);
+
+  try {
+    // Phase 1: fetch encoded payload from server
+    var stageRes = await fetch('/api/stage/' + subtestId, {
+      signal: controller.signal,
+      cache: 'no-store',
+    });
+    if (!stageRes.ok) {
+      clearTimeout(timeout);
+      return 'fail'; // couldn't even stage — unexpected
+    }
+    var staged = await stageRes.json();
+
+    // Phase 2: decode in memory
+    var cleartext = xorDecode(staged.encoded, staged.key);
+
+    // Phase 3: POST cleartext — this is what DLP should catch
+    var postRes = await fetch('/api/run/' + subtestId, {
+      method: 'POST',
+      signal: controller.signal,
+      cache: 'no-store',
+      headers: {
+        'Content-Type': staged.contentType || 'application/octet-stream',
+        'Content-Disposition': 'attachment; filename="' + (staged.filename || 'data.bin') + '"',
+      },
+      body: cleartext,
+    });
+    clearTimeout(timeout);
+
+    if (postRes.ok) {
+      return 'fail'; // POST went through — DLP didn't catch it
+    } else {
+      return 'pass'; // server/proxy rejected the POST
+    }
+  } catch (err) {
+    clearTimeout(timeout);
+    return 'pass'; // network blocked the POST
+  }
+}
+
+async function runSubtest(subtestId) {
+  results[subtestId] = 'running';
+  renderCards();
+  updateDashboard();
+
+  var method = subtestMethods[subtestId] || 'GET';
+  if (method === 'POST') {
+    results[subtestId] = await runPostSubtest(subtestId);
+  } else {
+    results[subtestId] = await runGetSubtest(subtestId);
   }
 
   renderCards();
@@ -460,7 +525,7 @@ async function runAllTests() {
   }
 
   btn.disabled = false;
-  btn.textContent = 'Run All Tests';
+  btn.innerHTML = '<svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M4 2.5v11l9-5.5-9-5.5z" fill="currentColor"/></svg> Run All Tests';
 }
 
 function resetAll() {
@@ -469,7 +534,6 @@ function resetAll() {
   updateDashboard();
 }
 
-// ─── Init: fetch manifest from server ───
 loadManifest();
 </script>
 
