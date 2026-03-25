@@ -154,10 +154,10 @@ const TEST_MANIFEST = [
     title: 'Credit Card Exfiltration',
     desc: 'Attempts to exfiltrate Luhn-valid credit card numbers (Visa, Mastercard, Amex, Discover, JCB, Diners) via multiple data formats and transport methods.',
     subtests: [
-      { id: 'cc-csv',    label: 'CSV Download',  method: 'GET'  },
-      { id: 'cc-json',   label: 'JSON API',       method: 'GET'  },
-      { id: 'cc-post',   label: 'POST Upload',    method: 'POST' },
-      { id: 'cc-hidden', label: 'Hidden HTML',    method: 'GET'  },
+      { id: 'cc-csv',    label: 'CSV Download',  method: 'GET',  filename: 'customer_cards.csv' },
+      { id: 'cc-json',   label: 'JSON API',       method: 'GET',  filename: 'payment_data.json' },
+      { id: 'cc-post',   label: 'POST Upload',    method: 'POST', filename: 'exfiltrated_cards.csv' },
+      { id: 'cc-hidden', label: 'Hidden HTML',    method: 'GET',  filename: 'order_confirmation.html' },
     ]
   },
   {
@@ -166,10 +166,10 @@ const TEST_MANIFEST = [
     title: 'Antivirus Detection',
     desc: 'Downloads the industry-standard antivirus test file in various archive formats. Scanners should detect the signature even inside compressed archives.',
     subtests: [
-      { id: 'eicar-plain',  label: 'Plain File',     method: 'GET' },
-      { id: 'eicar-zip',    label: 'Zipped',          method: 'GET' },
-      { id: 'eicar-dblzip', label: 'Double-Zipped',   method: 'GET' },
-      { id: 'eicar-rar',    label: 'RAR Archive',     method: 'GET' },
+      { id: 'eicar-plain',  label: 'Plain File',     method: 'GET', filename: 'eicar.com' },
+      { id: 'eicar-zip',    label: 'Zipped',          method: 'GET', filename: 'eicar.zip' },
+      { id: 'eicar-dblzip', label: 'Double-Zipped',   method: 'GET', filename: 'eicar_nested.zip' },
+      { id: 'eicar-rar',    label: 'RAR Archive',     method: 'GET', filename: 'eicar.rar' },
     ]
   },
   {
@@ -178,7 +178,7 @@ const TEST_MANIFEST = [
     title: 'Ransomware Detection',
     desc: 'Downloads an archive with ransom note, encrypted file extensions, and embedded malware test payload disguised as an executable.',
     subtests: [
-      { id: 'ransom-zip', label: 'Ransom Archive', method: 'GET' },
+      { id: 'ransom-zip', label: 'Ransom Archive', method: 'GET', filename: 'urgent_invoice.zip' },
     ]
   },
   {
@@ -187,7 +187,7 @@ const TEST_MANIFEST = [
     title: 'Executable Download',
     desc: 'Attempts to download a PE32 executable file. Security policies should block executable downloads from untrusted sources.',
     subtests: [
-      { id: 'exe-dl', label: 'PE32 Binary', method: 'GET' },
+      { id: 'exe-dl', label: 'PE32 Binary', method: 'GET', filename: 'software_update.exe' },
     ]
   },
   {
@@ -196,8 +196,8 @@ const TEST_MANIFEST = [
     title: 'Mass Email Exfiltration',
     desc: 'Attempts to exfiltrate 150+ email addresses with associated PII data via file download and upload methods.',
     subtests: [
-      { id: 'email-dl',   label: 'CSV Download',  method: 'GET'  },
-      { id: 'email-post', label: 'POST Upload',   method: 'POST' },
+      { id: 'email-dl',   label: 'CSV Download',  method: 'GET',  filename: 'employee_directory.csv' },
+      { id: 'email-post', label: 'POST Upload',   method: 'POST', filename: 'exfiltrated_contacts.csv' },
     ]
   },
   {
@@ -206,8 +206,8 @@ const TEST_MANIFEST = [
     title: 'Cross-Site Scripting',
     desc: 'Loads pages with reflected and DOM-based injection vectors. Security proxies should strip or neutralize these patterns.',
     subtests: [
-      { id: 'xss-reflect', label: 'Reflected XSS',    method: 'GET' },
-      { id: 'xss-payload', label: 'Multi-Vector XSS',  method: 'GET' },
+      { id: 'xss-reflect', label: 'Reflected XSS',    method: 'GET', filename: 'search_results.html' },
+      { id: 'xss-payload', label: 'Multi-Vector XSS',  method: 'GET', filename: 'page.html' },
     ]
   },
 ];
@@ -303,14 +303,16 @@ const GET_HANDLERS = {
     if (!fs.existsSync(EICAR_RAR_PATH)) {
       return res.status(500).json({ error: 'eicar.rar not found — place a real RAR archive at testdata/eicar.rar' });
     }
-    // Read fully into memory so Express sets Content-Length.
-    // Without it, the response uses chunked transfer encoding
-    // and many proxies/firewalls skip scanning chunked streams.
-    const rarBuf = fs.readFileSync(EICAR_RAR_PATH);
-    res.setHeader('Content-Type', 'application/x-rar-compressed');
-    res.setHeader('Content-Disposition', 'attachment; filename="eicar.rar"');
-    res.setHeader('Content-Length', rarBuf.length);
-    res.send(rarBuf);
+    res.sendFile(EICAR_RAR_PATH, {
+      headers: {
+        'Content-Type': 'application/x-rar-compressed',
+        'Content-Disposition': 'attachment; filename="eicar.rar"',
+      },
+    }, (err) => {
+      if (err && !res.headersSent) {
+        res.status(500).json({ error: 'Failed to send eicar.rar' });
+      }
+    });
   },
 
   'ransom-zip': (req, res) => {
@@ -392,7 +394,10 @@ app.get('/api/stage/:subtestId', (req, res) => {
 });
 
 // ─── RUN endpoint for GET tests ───
-app.get('/api/run/:subtestId', (req, res) => {
+// Route accepts optional trailing filename so the URL looks like
+// /api/run/eicar-rar/eicar.rar — many firewalls use the URL file
+// extension to decide which content scanner to engage.
+app.get('/api/run/:subtestId/:filename?', (req, res) => {
   const handler = GET_HANDLERS[req.params.subtestId];
   if (!handler) return res.status(404).json({ error: 'Unknown subtest or wrong method (use POST)' });
   handler(req, res);
@@ -401,7 +406,7 @@ app.get('/api/run/:subtestId', (req, res) => {
 // ─── RUN endpoint for POST tests ───
 // Expects cleartext payload in the request body.
 // If the DLP/proxy lets this through, the test FAILS.
-app.post('/api/run/:subtestId', (req, res) => {
+app.post('/api/run/:subtestId/:filename?', (req, res) => {
   const validPostTests = Object.keys(STAGE_GENERATORS);
   if (!validPostTests.includes(req.params.subtestId)) {
     return res.status(404).json({ error: 'Unknown POST subtest' });
