@@ -303,9 +303,14 @@ const GET_HANDLERS = {
     if (!fs.existsSync(EICAR_RAR_PATH)) {
       return res.status(500).json({ error: 'eicar.rar not found — place a real RAR archive at testdata/eicar.rar' });
     }
+    // Read fully into memory so Express sets Content-Length.
+    // Without it, the response uses chunked transfer encoding
+    // and many proxies/firewalls skip scanning chunked streams.
+    const rarBuf = fs.readFileSync(EICAR_RAR_PATH);
     res.setHeader('Content-Type', 'application/x-rar-compressed');
     res.setHeader('Content-Disposition', 'attachment; filename="eicar.rar"');
-    fs.createReadStream(EICAR_RAR_PATH).pipe(res);
+    res.setHeader('Content-Length', rarBuf.length);
+    res.send(rarBuf);
   },
 
   'ransom-zip': (req, res) => {
