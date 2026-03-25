@@ -306,6 +306,7 @@ var results = {};
 
 // Build a lookup: subtestId -> method from manifest
 var subtestMethods = {};
+var subtestFilenames = {};
 
 // ─── XOR Decode ───
 // Mirrors the server-side xorEncode. Key + base64 blob
@@ -324,12 +325,13 @@ function xorDecode(base64Str, key) {
 
 async function loadManifest() {
   try {
-    var res = await fetch('/api/manifest');
+    var res = await fetch(cacheBust('/api/manifest'));
     manifest = await res.json();
     // Build method lookup
     manifest.forEach(function(test) {
       test.subtests.forEach(function(st) {
         subtestMethods[st.id] = st.method || 'GET';
+        subtestFilenames[st.id] = st.filename || '';
       });
     });
     renderCards();
@@ -422,14 +424,27 @@ function updateDashboard() {
 
 // ─── Test Execution ───
 
+// Append a unique query param to defeat browser and proxy caches.
+// cache:'no-store' alone is unreliable through corporate proxies.
+function cacheBust(url) {
+  var sep = url.indexOf('?') === -1 ? '?' : '&';
+  return url + sep + '_t=' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+}
+
+// Build URL with trailing filename so firewalls see the file extension.
+// e.g. /api/run/eicar-rar/eicar.rar instead of /api/run/eicar-rar
+function buildRunUrl(subtestId) {
+  var fn = subtestFilenames[subtestId];
+  return '/api/run/' + subtestId + (fn ? '/' + fn : '');
+}
+
 // GET test: try to download payload. If blocked → pass.
 async function runGetSubtest(subtestId) {
   var controller = new AbortController();
   var timeout = setTimeout(function() { controller.abort(); }, 15000);
 
   try {
-    var response = await fetch('/api/run/' + subtestId, {
-      method: 'GET',
+    var response = await fetch(cacheBust(buildRunUrl(subtestId)), {
       signal: controller.signal,
       cache: 'no-store',
     });
@@ -458,7 +473,7 @@ async function runPostSubtest(subtestId) {
 
   try {
     // Phase 1: fetch encoded payload from server
-    var stageRes = await fetch('/api/stage/' + subtestId, {
+    var stageRes = await fetch(cacheBust('/api/stage/' + subtestId), {
       signal: controller.signal,
       cache: 'no-store',
     });
@@ -472,7 +487,7 @@ async function runPostSubtest(subtestId) {
     var cleartext = xorDecode(staged.encoded, staged.key);
 
     // Phase 3: POST cleartext — this is what DLP should catch
-    var postRes = await fetch('/api/run/' + subtestId, {
+    var postRes = await fetch(cacheBust(buildRunUrl(subtestId)), {
       method: 'POST',
       signal: controller.signal,
       cache: 'no-store',

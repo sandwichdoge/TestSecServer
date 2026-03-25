@@ -11,6 +11,17 @@ app.use(express.json({ limit: '2mb' }));
 app.use(express.urlencoded({ extended: true, limit: '2mb' }));
 app.use(express.raw({ type: 'text/csv', limit: '2mb' }));
 app.use(express.raw({ type: 'application/octet-stream', limit: '2mb' }));
+
+// Prevent browsers and intermediate proxies from caching ANY API response.
+// Without this, stopped-server tests can still "pass" from stale cache.
+app.use('/api', (req, res, next) => {
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
+  res.setHeader('Surrogate-Control', 'no-store');
+  next();
+});
+
 app.use(express.static(path.join(__dirname, 'public')));
 
 // ═══════════════════════════════════════════════
