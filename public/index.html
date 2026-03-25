@@ -476,7 +476,7 @@ const TESTS = [
       { id: 'cc-csv',    label: 'CSV Download',   url: '/api/test/credit-card-csv',    method: 'GET' },
       { id: 'cc-json',   label: 'JSON API',       url: '/api/test/credit-card-json',   method: 'GET' },
       { id: 'cc-post',   label: 'POST Upload',    url: '/api/test/credit-card-post',   method: 'POST',
-        body: JSON.stringify({ cards: ['4111111111111111','5500000000000004','340000000000009'] }) },
+        bodyUrl: '/api/payload/credit-cards' },
       { id: 'cc-hidden', label: 'Hidden HTML',     url: '/api/test/credit-card-hidden', method: 'GET' },
     ]
   },
@@ -518,7 +518,7 @@ const TESTS = [
     subtests: [
       { id: 'email-dl',   label: 'CSV Download',   url: '/api/test/email-exfil-download', method: 'GET' },
       { id: 'email-post', label: 'POST Upload',     url: '/api/test/email-exfil-post',     method: 'POST',
-        body: JSON.stringify({ emails: Array.from({length: 150}, (_, i) => `user${i}@example.com`) }) },
+        bodyUrl: '/api/payload/emails' },
     ]
   },
   {
@@ -637,7 +637,13 @@ async function runSubtest(subtest) {
 
     if (subtest.method === 'POST') {
       opts.headers = { 'Content-Type': 'application/json' };
-      opts.body = subtest.body;
+      // Fetch payload dynamically so sensitive data never sits in page source
+      if (subtest.bodyUrl) {
+        const payloadRes = await fetch(subtest.bodyUrl, { cache: 'no-store' });
+        opts.body = await payloadRes.text();
+      } else {
+        opts.body = subtest.body;
+      }
     }
 
     const response = await fetch(subtest.url, opts);

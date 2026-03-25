@@ -22,21 +22,46 @@ The server hosts test endpoints that serve threat-like payloads. The browser UI 
 ## Quick Start
 
 ```bash
-# Clone and install
-git clone <repo-url> && cd threat-exposure-test
+tar xzf threat-exposure-test.tar.gz
+cd threat-exposure-test
 npm install
-
-# Run
 npm start
 # → http://localhost:3000
 ```
 
-## Docker
+## Public Deployment
+
+### Option A: Any VPS (Ubuntu/Debian one-liner)
 
 ```bash
-docker build -t threat-exposure-test .
-docker run -p 3000:3000 threat-exposure-test
+# Upload the project to your VPS, then:
+chmod +x deploy.sh
+sudo ./deploy.sh
+# → http://YOUR_PUBLIC_IP (port 80, systemd managed)
 ```
+
+### Option B: Docker
+
+```bash
+docker compose up -d
+# → http://YOUR_PUBLIC_IP (port 80)
+```
+
+### Option C: Manual (any server)
+
+```bash
+npm install
+PORT=80 node server.js
+# Or behind nginx/caddy on any port
+```
+
+### Cloud-specific notes
+
+- **AWS EC2 / Lightsail**: Open port 80 in Security Group inbound rules
+- **DigitalOcean / Vultr / Linode**: Firewall is open by default; just deploy
+- **GCP Compute Engine**: Add firewall rule allowing tcp:80
+- **Azure VM**: Add inbound port rule for port 80 in Network Security Group
+- **Oracle Cloud**: Add ingress rule for port 80 in Security List + run `sudo iptables -I INPUT -p tcp --dport 80 -j ACCEPT`
 
 ## Deployment Notes
 

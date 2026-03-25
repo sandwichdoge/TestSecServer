@@ -342,11 +342,32 @@ app.get('/api/test/xss-payload', (req, res) => {
   res.send(html);
 });
 
+// ── Payload endpoints (fetched by client at test time, not embedded in page) ──
+app.get('/api/payload/credit-cards', (req, res) => {
+  const cards = generateCreditCards(25);
+  res.json({ cards: cards.map(c => c.number) });
+});
+
+app.get('/api/payload/emails', (req, res) => {
+  const emails = generateEmails(150);
+  res.json({ emails });
+});
+
 // ── Health check ──
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', version: '1.0.0', tests: 6 });
 });
 
 app.listen(PORT, '0.0.0.0', () => {
-  console.log(`\n🛡️  Threat Exposure Test Server running on http://localhost:${PORT}\n`);
+  const os = require('os');
+  const ifaces = Object.values(os.networkInterfaces()).flat().filter(i => i.family === 'IPv4' && !i.internal);
+  console.log(`\n🛡️  Threat Exposure Test Server running on:`);
+  console.log(`   → http://localhost:${PORT}`);
+  ifaces.forEach(i => console.log(`   → http://${i.address}:${PORT}`));
+  console.log(`\n   ${getSubtestTotal()} sub-tests across 6 categories\n`);
 });
+
+function getSubtestTotal() {
+  // Count: 4 CC + 4 EICAR + 1 ransomware + 1 exe + 2 email + 2 XSS = 14
+  return 14;
+}

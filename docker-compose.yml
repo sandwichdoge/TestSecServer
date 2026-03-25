@@ -1,0 +1,10 @@
+version: '3.8'
+services:
+  threat-test:
+    build: .
+    ports:
+      - "80:3000"
+    restart: unless-stopped
+    environment:
+      - PORT=3000
+      - NODE_ENV=production
