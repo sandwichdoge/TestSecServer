@@ -139,6 +139,12 @@
 
   .test-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 16px; }
 
+  /* Cards with 5+ subtests get full width so the pills aren't cramped */
+  .test-card.wide { grid-column: 1 / -1; }
+  .test-card.wide .card-body { display: grid; grid-template-columns: 1fr 1fr; gap: 0 24px; }
+  .test-card.wide .card-desc { grid-column: 1; }
+  .test-card.wide .card-subtests { grid-column: 1 / -1; }
+
   .test-card {
     position: relative; padding: 24px; border-radius: var(--radius);
     border: 1px solid var(--border); background: var(--bg-card);
@@ -171,6 +177,7 @@
   .status-running { background: var(--accent-amber-dim); color: var(--accent-amber); }
   .status-pass { background: var(--accent-green-dim); color: var(--accent-green); }
   .status-fail { background: var(--accent-red-dim); color: var(--accent-red); }
+  .status-mixed { background: var(--accent-amber-dim); color: var(--accent-amber); }
   .card-status .dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
   .status-running .dot { animation: pulse-dot 1s ease-in-out infinite; }
 
@@ -185,11 +192,23 @@
     font-family: 'JetBrains Mono', monospace; font-size: 11px;
     background: rgba(100,116,139,0.1); color: var(--text-muted);
     border: 1px solid transparent; transition: all 0.3s;
+    cursor: default;
   }
   .subtest.pass { background: var(--accent-green-dim); color: var(--accent-green); border-color: rgba(34,197,94,0.2); }
   .subtest.fail { background: var(--accent-red-dim); color: var(--accent-red); border-color: rgba(239,68,68,0.2); }
   .subtest.running { background: var(--accent-amber-dim); color: var(--accent-amber); }
   .subtest-icon { font-size: 10px; }
+
+  .stage-num {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 14px; height: 14px; border-radius: 50%;
+    font-size: 9px; font-weight: 700; line-height: 1;
+    background: rgba(100,116,139,0.2); color: var(--text-muted);
+    margin-right: 1px; flex-shrink: 0;
+  }
+  .subtest.pass .stage-num { background: rgba(34,197,94,0.25); color: var(--accent-green); }
+  .subtest.fail .stage-num { background: rgba(239,68,68,0.25); color: var(--accent-red); }
+  .subtest.running .stage-num { background: rgba(245,158,11,0.25); color: var(--accent-amber); }
 
   .method-badge {
     display: inline-block; padding: 1px 4px; border-radius: 3px;
@@ -198,6 +217,21 @@
   }
   .method-get  { background: rgba(59,130,246,0.15); color: var(--accent-blue); }
   .method-post { background: var(--accent-purple-dim); color: var(--accent-purple); }
+
+  .card-progress {
+    margin-top: 12px; height: 3px; border-radius: 2px;
+    background: var(--border); overflow: hidden;
+    display: none;
+  }
+  .test-card.running .card-progress,
+  .test-card.pass .card-progress,
+  .test-card.fail .card-progress { display: block; }
+
+  .card-progress-inner {
+    height: 100%; border-radius: 2px;
+    transition: width 0.4s ease, background 0.3s;
+    width: 0;
+  }
 
   .info-banner {
     margin-top: 40px; padding: 20px 24px; border-radius: var(--radius);
@@ -213,11 +247,12 @@
   }
   footer a { color: var(--accent-blue); text-decoration: none; }
 
-  @media (max-width: 600px) {
+  @media (max-width: 700px) {
     .container { padding: 24px 16px 60px; }
     .dashboard { gap: 16px; padding: 16px; }
     .score-stats { gap: 16px; }
     .test-grid { grid-template-columns: 1fr; }
+    .test-card.wide .card-body { grid-template-columns: 1fr; }
     .controls { flex-direction: column; align-items: stretch; }
   }
 </style>
@@ -301,16 +336,16 @@ var ICON_MAP = {
   'code':        '\uD83D\uDD77\uFE0F',
 };
 
+// Categories with multi-stage attacks get numbered pills
+var STAGED_CATEGORIES = { 'ransomware': true };
+
 var manifest = [];
 var results = {};
 
-// Build a lookup: subtestId -> method from manifest
 var subtestMethods = {};
 var subtestFilenames = {};
 
 // ─── XOR Decode ───
-// Mirrors the server-side xorEncode. Key + base64 blob
-// arrive via /api/stage, decoded here to cleartext.
 function xorDecode(base64Str, key) {
   var raw = atob(base64Str);
   var keyBytes = [];
@@ -319,7 +354,6 @@ function xorDecode(base64Str, key) {
   for (var i = 0; i < raw.length; i++) {
     out[i] = raw.charCodeAt(i) ^ keyBytes[i % keyBytes.length];
   }
-  // Convert Uint8Array to string (UTF-8 text payloads)
   return new TextDecoder().decode(out);
 }
 
@@ -327,7 +361,6 @@ async function loadManifest() {
   try {
     var res = await fetch(cacheBust('/api/manifest'));
     manifest = await res.json();
-    // Build method lookup
     manifest.forEach(function(test) {
       test.subtests.forEach(function(st) {
         subtestMethods[st.id] = st.method || 'GET';
@@ -353,15 +386,34 @@ function renderCards() {
   grid.innerHTML = '';
   manifest.forEach(function(test) {
     var cardState = getCardState(test);
+    var isWide = test.subtests.length >= 5;
+    var isStaged = STAGED_CATEGORIES[test.id] || false;
+
     var card = document.createElement('div');
-    card.className = 'test-card ' + cardState;
+    card.className = 'test-card ' + cardState + (isWide ? ' wide' : '');
+
     var statusClass = cardState === 'pass' ? 'status-pass' :
                       cardState === 'fail' ? 'status-fail' :
+                      cardState === 'mixed' ? 'status-mixed' :
                       cardState === 'running' ? 'status-running' : 'status-idle';
     var statusText = cardState === 'pass' ? 'Protected' :
                      cardState === 'fail' ? 'Exposed' :
+                     cardState === 'mixed' ? 'Partial' :
                      cardState === 'running' ? 'Testing' : 'Ready';
+
     var icon = ICON_MAP[test.icon] || '\uD83D\uDD12';
+
+    // Progress bar data
+    var doneCount = 0, passCount = 0;
+    test.subtests.forEach(function(st) {
+      var s = results[st.id];
+      if (s === 'pass' || s === 'fail') { doneCount++; if (s === 'pass') passCount++; }
+      else if (s === 'running') doneCount += 0.5;
+    });
+    var progressPct = Math.round((doneCount / test.subtests.length) * 100);
+    var progressColor = passCount === doneCount ? 'var(--accent-green)' :
+                        passCount === 0 && doneCount > 0 ? 'var(--accent-red)' : 'var(--accent-amber)';
+
     card.innerHTML =
       '<div class="card-top">' +
         '<div class="card-icon">' + icon + '</div>' +
@@ -369,16 +421,28 @@ function renderCards() {
           '<span class="dot"></span>' + statusText +
         '</div>' +
       '</div>' +
-      '<div class="card-title">' + test.title + '</div>' +
-      '<div class="card-desc">' + test.desc + '</div>' +
-      '<div class="card-subtests">' +
-        test.subtests.map(function(st) {
-          var state = results[st.id] || 'idle';
-          var ic = state === 'pass' ? '\u2713' : state === 'fail' ? '\u2717' : state === 'running' ? '\u25CC' : '\u00B7';
-          var method = st.method || 'GET';
-          var methodBadge = '<span class="method-badge method-' + method.toLowerCase() + '">' + method + '</span>';
-          return '<span class="subtest ' + state + '"><span class="subtest-icon">' + ic + '</span> ' + st.label + ' ' + methodBadge + '</span>';
-        }).join('') +
+      '<div class="card-body">' +
+        '<div>' +
+          '<div class="card-title">' + test.title + '</div>' +
+          '<div class="card-desc">' + test.desc + '</div>' +
+        '</div>' +
+        '<div class="card-subtests">' +
+          test.subtests.map(function(st, idx) {
+            var state = results[st.id] || 'idle';
+            var ic = state === 'pass' ? '\u2713' : state === 'fail' ? '\u2717' : state === 'running' ? '\u25CC' : '\u00B7';
+            var method = st.method || 'GET';
+            var methodBadge = '<span class="method-badge method-' + method.toLowerCase() + '">' + method + '</span>';
+            var stageTag = isStaged ? '<span class="stage-num">' + (idx + 1) + '</span>' : '';
+            return '<span class="subtest ' + state + '" title="' + st.id + '">' +
+              stageTag +
+              '<span class="subtest-icon">' + ic + '</span> ' +
+              st.label + ' ' + methodBadge +
+            '</span>';
+          }).join('') +
+        '</div>' +
+      '</div>' +
+      '<div class="card-progress">' +
+        '<div class="card-progress-inner" style="width:' + progressPct + '%;background:' + progressColor + '"></div>' +
       '</div>';
     grid.appendChild(card);
   });
@@ -389,7 +453,12 @@ function getCardState(test) {
   if (states.some(function(s) { return s === 'running'; })) return 'running';
   if (states.every(function(s) { return s === 'idle'; })) return '';
   if (states.every(function(s) { return s === 'pass'; })) return 'pass';
-  if (states.some(function(s) { return s === 'fail'; })) return 'fail';
+  if (states.every(function(s) { return s === 'fail'; })) return 'fail';
+  // Mix of pass/fail (and possibly idle)
+  var hasDone = states.some(function(s) { return s === 'pass' || s === 'fail'; });
+  var allDone = states.every(function(s) { return s === 'pass' || s === 'fail'; });
+  if (allDone && states.some(function(s) { return s === 'fail'; })) return 'fail';
+  if (hasDone && states.some(function(s) { return s === 'fail'; })) return 'mixed';
   return '';
 }
 
@@ -424,21 +493,16 @@ function updateDashboard() {
 
 // ─── Test Execution ───
 
-// Append a unique query param to defeat browser and proxy caches.
-// cache:'no-store' alone is unreliable through corporate proxies.
 function cacheBust(url) {
   var sep = url.indexOf('?') === -1 ? '?' : '&';
   return url + sep + '_t=' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
 }
 
-// Build URL with trailing filename so firewalls see the file extension.
-// e.g. /api/run/eicar-rar/eicar.rar instead of /api/run/eicar-rar
 function buildRunUrl(subtestId) {
   var fn = subtestFilenames[subtestId];
   return '/api/run/' + subtestId + (fn ? '/' + fn : '');
 }
 
-// GET test: try to download payload. If blocked → pass.
 async function runGetSubtest(subtestId) {
   var controller = new AbortController();
   var timeout = setTimeout(function() { controller.abort(); }, 15000);
@@ -450,43 +514,34 @@ async function runGetSubtest(subtestId) {
     });
     clearTimeout(timeout);
     if (response.ok) {
-      await response.arrayBuffer(); // consume body
-      return 'fail'; // payload came through unblocked
+      await response.arrayBuffer();
+      return 'fail';
     } else {
-      return 'pass'; // server/proxy rejected it
+      return 'pass';
     }
   } catch (err) {
     clearTimeout(timeout);
-    return 'pass'; // network blocked it
+    return 'pass';
   }
 }
 
-// POST test: two-phase flow
-// 1. GET /api/stage/:id → { key, encoded, contentType, filename }
-//    The response is XOR + base64, opaque to inline scanners
-// 2. Decode in JS memory → cleartext sensitive data
-// 3. POST cleartext to /api/run/:id
-//    DLP/proxy should catch this outbound exfiltration
 async function runPostSubtest(subtestId) {
   var controller = new AbortController();
   var timeout = setTimeout(function() { controller.abort(); }, 20000);
 
   try {
-    // Phase 1: fetch encoded payload from server
     var stageRes = await fetch(cacheBust('/api/stage/' + subtestId), {
       signal: controller.signal,
       cache: 'no-store',
     });
     if (!stageRes.ok) {
       clearTimeout(timeout);
-      return 'fail'; // couldn't even stage — unexpected
+      return 'fail';
     }
     var staged = await stageRes.json();
 
-    // Phase 2: decode in memory
     var cleartext = xorDecode(staged.encoded, staged.key);
 
-    // Phase 3: POST cleartext — this is what DLP should catch
     var postRes = await fetch(cacheBust(buildRunUrl(subtestId)), {
       method: 'POST',
       signal: controller.signal,
@@ -500,13 +555,13 @@ async function runPostSubtest(subtestId) {
     clearTimeout(timeout);
 
     if (postRes.ok) {
-      return 'fail'; // POST went through — DLP didn't catch it
+      return 'fail';
     } else {
-      return 'pass'; // server/proxy rejected the POST
+      return 'pass';
     }
   } catch (err) {
     clearTimeout(timeout);
-    return 'pass'; // network blocked the POST
+    return 'pass';
   }
 }
 
