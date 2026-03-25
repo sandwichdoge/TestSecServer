@@ -1,0 +1,698 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Threat Exposure Test</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg-primary: #0a0e17;
+    --bg-card: #111827;
+    --bg-card-hover: #1a2332;
+    --border: #1e293b;
+    --border-active: #334155;
+    --text-primary: #e2e8f0;
+    --text-secondary: #94a3b8;
+    --text-muted: #64748b;
+    --accent-red: #ef4444;
+    --accent-red-dim: rgba(239, 68, 68, 0.15);
+    --accent-green: #22c55e;
+    --accent-green-dim: rgba(34, 197, 94, 0.15);
+    --accent-amber: #f59e0b;
+    --accent-amber-dim: rgba(245, 158, 11, 0.15);
+    --accent-blue: #3b82f6;
+    --accent-blue-dim: rgba(59, 130, 246, 0.12);
+    --accent-cyan: #06b6d4;
+    --accent-purple: #a855f7;
+    --radius: 12px;
+    --radius-sm: 8px;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: 'Plus Jakarta Sans', -apple-system, sans-serif;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* ─── Background grid pattern ─── */
+  body::before {
+    content: '';
+    position: fixed; inset: 0; z-index: 0;
+    background-image:
+      linear-gradient(rgba(59, 130, 246, 0.03) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(59, 130, 246, 0.03) 1px, transparent 1px);
+    background-size: 40px 40px;
+    pointer-events: none;
+  }
+
+  body::after {
+    content: '';
+    position: fixed; top: -40%; left: -20%; z-index: 0;
+    width: 80vw; height: 80vw;
+    background: radial-gradient(circle, rgba(59, 130, 246, 0.06) 0%, transparent 60%);
+    pointer-events: none;
+  }
+
+  .container {
+    position: relative; z-index: 1;
+    max-width: 1100px;
+    margin: 0 auto;
+    padding: 40px 24px 80px;
+  }
+
+  /* ─── Header ─── */
+  .header {
+    text-align: center;
+    margin-bottom: 48px;
+  }
+
+  .header-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 16px;
+    border-radius: 100px;
+    border: 1px solid var(--border);
+    background: var(--accent-blue-dim);
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--accent-blue);
+    margin-bottom: 20px;
+  }
+
+  .header-badge::before {
+    content: '';
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--accent-blue);
+    box-shadow: 0 0 8px var(--accent-blue);
+    animation: pulse-dot 2s ease-in-out infinite;
+  }
+
+  @keyframes pulse-dot {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
+  }
+
+  h1 {
+    font-size: clamp(28px, 4vw, 42px);
+    font-weight: 800;
+    letter-spacing: -0.03em;
+    line-height: 1.1;
+    margin-bottom: 12px;
+    background: linear-gradient(135deg, #e2e8f0 0%, #94a3b8 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+
+  .header p {
+    color: var(--text-secondary);
+    font-size: 15px;
+    max-width: 600px;
+    margin: 0 auto 28px;
+    line-height: 1.6;
+  }
+
+  /* ─── Score Dashboard ─── */
+  .dashboard {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 32px;
+    padding: 24px;
+    border-radius: var(--radius);
+    border: 1px solid var(--border);
+    background: var(--bg-card);
+    margin-bottom: 40px;
+    flex-wrap: wrap;
+  }
+
+  .score-ring {
+    position: relative;
+    width: 100px; height: 100px;
+    flex-shrink: 0;
+  }
+
+  .score-ring svg { transform: rotate(-90deg); }
+
+  .score-ring circle {
+    fill: none;
+    stroke-width: 6;
+    stroke-linecap: round;
+  }
+
+  .score-ring .track { stroke: var(--border); }
+  .score-ring .progress {
+    stroke: var(--accent-blue);
+    transition: stroke-dashoffset 0.8s ease, stroke 0.4s ease;
+  }
+
+  .score-ring .label {
+    position: absolute; inset: 0;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    font-family: 'JetBrains Mono', monospace;
+  }
+
+  .score-ring .label .num {
+    font-size: 26px; font-weight: 700;
+    line-height: 1;
+  }
+
+  .score-ring .label .of {
+    font-size: 11px; color: var(--text-muted);
+  }
+
+  .score-stats {
+    display: flex; gap: 28px; flex-wrap: wrap;
+  }
+
+  .stat {
+    text-align: center;
+  }
+
+  .stat-val {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 28px; font-weight: 700;
+  }
+
+  .stat-label {
+    font-size: 12px;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    margin-top: 2px;
+  }
+
+  .stat-val.protected { color: var(--accent-green); }
+  .stat-val.exposed { color: var(--accent-red); }
+  .stat-val.pending { color: var(--text-muted); }
+
+  /* ─── Controls ─── */
+  .controls {
+    display: flex;
+    justify-content: center;
+    gap: 12px;
+    margin-bottom: 36px;
+  }
+
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 12px 28px;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border);
+    background: var(--bg-card);
+    color: var(--text-primary);
+    font-family: inherit;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+
+  .btn:hover { background: var(--bg-card-hover); border-color: var(--border-active); }
+
+  .btn-primary {
+    background: var(--accent-blue);
+    border-color: var(--accent-blue);
+    color: #fff;
+  }
+
+  .btn-primary:hover {
+    background: #2563eb;
+    border-color: #2563eb;
+    box-shadow: 0 0 24px rgba(59, 130, 246, 0.3);
+  }
+
+  .btn-primary:disabled {
+    opacity: 0.5; cursor: not-allowed;
+    box-shadow: none;
+  }
+
+  /* ─── Test Grid ─── */
+  .test-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+    gap: 16px;
+  }
+
+  .test-card {
+    position: relative;
+    padding: 24px;
+    border-radius: var(--radius);
+    border: 1px solid var(--border);
+    background: var(--bg-card);
+    transition: all 0.3s;
+    overflow: hidden;
+  }
+
+  .test-card::before {
+    content: '';
+    position: absolute; top: 0; left: 0; right: 0;
+    height: 2px;
+    background: var(--border);
+    transition: background 0.4s;
+  }
+
+  .test-card.pass::before { background: var(--accent-green); box-shadow: 0 0 16px var(--accent-green-dim); }
+  .test-card.fail::before { background: var(--accent-red); box-shadow: 0 0 16px var(--accent-red-dim); }
+  .test-card.running::before { background: var(--accent-amber); animation: scan-line 1s ease-in-out infinite; }
+
+  @keyframes scan-line {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
+  }
+
+  .test-card:hover { border-color: var(--border-active); }
+
+  .card-top {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    margin-bottom: 12px;
+  }
+
+  .card-icon {
+    width: 40px; height: 40px;
+    border-radius: var(--radius-sm);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 18px;
+    background: var(--accent-blue-dim);
+    flex-shrink: 0;
+  }
+
+  .card-status {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    border-radius: 100px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+
+  .status-idle { background: rgba(100,116,139,0.15); color: var(--text-muted); }
+  .status-running { background: var(--accent-amber-dim); color: var(--accent-amber); }
+  .status-pass { background: var(--accent-green-dim); color: var(--accent-green); }
+  .status-fail { background: var(--accent-red-dim); color: var(--accent-red); }
+
+  .card-status .dot {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: currentColor;
+  }
+
+  .status-running .dot { animation: pulse-dot 1s ease-in-out infinite; }
+
+  .card-title {
+    font-size: 16px;
+    font-weight: 700;
+    margin-bottom: 6px;
+    letter-spacing: -0.01em;
+  }
+
+  .card-desc {
+    font-size: 13px;
+    color: var(--text-secondary);
+    line-height: 1.5;
+    margin-bottom: 16px;
+  }
+
+  .card-subtests {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .subtest {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 3px 10px;
+    border-radius: 100px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    background: rgba(100,116,139,0.1);
+    color: var(--text-muted);
+    border: 1px solid transparent;
+    transition: all 0.3s;
+  }
+
+  .subtest.pass { background: var(--accent-green-dim); color: var(--accent-green); border-color: rgba(34,197,94,0.2); }
+  .subtest.fail { background: var(--accent-red-dim); color: var(--accent-red); border-color: rgba(239,68,68,0.2); }
+  .subtest.running { background: var(--accent-amber-dim); color: var(--accent-amber); }
+
+  .subtest-icon { font-size: 10px; }
+
+  /* ─── Info Banner ─── */
+  .info-banner {
+    margin-top: 40px;
+    padding: 20px 24px;
+    border-radius: var(--radius);
+    border: 1px solid rgba(59,130,246,0.2);
+    background: var(--accent-blue-dim);
+    display: flex;
+    align-items: flex-start;
+    gap: 14px;
+    font-size: 13px;
+    color: var(--text-secondary);
+    line-height: 1.6;
+  }
+
+  .info-banner .info-icon {
+    flex-shrink: 0;
+    font-size: 18px;
+    margin-top: 1px;
+  }
+
+  .info-banner strong { color: var(--text-primary); }
+
+  /* ─── Footer ─── */
+  footer {
+    margin-top: 48px;
+    text-align: center;
+    font-size: 12px;
+    color: var(--text-muted);
+  }
+
+  footer a { color: var(--accent-blue); text-decoration: none; }
+
+  /* ─── Responsive ─── */
+  @media (max-width: 600px) {
+    .container { padding: 24px 16px 60px; }
+    .dashboard { gap: 16px; padding: 16px; }
+    .score-stats { gap: 16px; }
+    .test-grid { grid-template-columns: 1fr; }
+    .controls { flex-direction: column; align-items: stretch; }
+  }
+</style>
+</head>
+<body>
+
+<div class="container">
+  <div class="header">
+    <div class="header-badge">Internet Threat Exposure</div>
+    <h1>Security Test Suite</h1>
+    <p>Tests whether your network security stack (proxy, firewall, DLP, antivirus) blocks common threats. Each test attempts something malicious — if it's <strong>blocked</strong>, you're protected.</p>
+  </div>
+
+  <div class="dashboard">
+    <div class="score-ring">
+      <svg viewBox="0 0 100 100" width="100" height="100">
+        <circle class="track" cx="50" cy="50" r="42" />
+        <circle class="progress" id="scoreArc" cx="50" cy="50" r="42"
+          stroke-dasharray="263.9"
+          stroke-dashoffset="263.9" />
+      </svg>
+      <div class="label">
+        <span class="num" id="scoreNum">—</span>
+        <span class="of" id="scoreOf"></span>
+      </div>
+    </div>
+    <div class="score-stats">
+      <div class="stat">
+        <div class="stat-val protected" id="protectedCount">0</div>
+        <div class="stat-label">Protected</div>
+      </div>
+      <div class="stat">
+        <div class="stat-val exposed" id="exposedCount">0</div>
+        <div class="stat-label">Exposed</div>
+      </div>
+      <div class="stat">
+        <div class="stat-val pending" id="pendingCount">—</div>
+        <div class="stat-label">Pending</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="controls">
+    <button class="btn btn-primary" id="runAllBtn" onclick="runAllTests()">
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M4 2.5v11l9-5.5-9-5.5z" fill="currentColor"/></svg>
+      Run All Tests
+    </button>
+    <button class="btn" onclick="resetAll()">
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M2 8a6 6 0 0110.89-3.48l.71-.71A7 7 0 102.29 9.71l.71-.71A5.97 5.97 0 012 8z" fill="currentColor"/></svg>
+      Reset
+    </button>
+  </div>
+
+  <div class="test-grid" id="testGrid"></div>
+
+  <div class="info-banner">
+    <span class="info-icon">ℹ️</span>
+    <div>
+      <strong>How it works:</strong> Each test makes an HTTP request to this server attempting to download or transmit threat-like content. If your security infrastructure (web proxy, next-gen firewall, DLP system, antivirus) intercepts and blocks the request, the test <strong>passes</strong>. A failed test means that type of threat could reach your network undetected. No actual malware is used — all payloads are inert test patterns like the EICAR standard.
+    </div>
+  </div>
+
+  <footer>
+    Open-source Threat Exposure Test Server &middot; Safe for production networks &middot;
+    Uses <a href="https://www.eicar.org/" target="_blank">EICAR</a> standard test patterns
+  </footer>
+</div>
+
+<script>
+// ─── Test Definitions ───
+const TESTS = [
+  {
+    id: 'credit-card',
+    icon: '💳',
+    title: 'Credit Card Exfiltration',
+    desc: 'Attempts to exfiltrate Luhn-valid credit card numbers (Visa, Mastercard, Amex, Discover) via CSV download, JSON API, POST upload, and hidden HTML fields.',
+    subtests: [
+      { id: 'cc-csv',    label: 'CSV Download',   url: '/api/test/credit-card-csv',    method: 'GET' },
+      { id: 'cc-json',   label: 'JSON API',       url: '/api/test/credit-card-json',   method: 'GET' },
+      { id: 'cc-post',   label: 'POST Upload',    url: '/api/test/credit-card-post',   method: 'POST',
+        body: JSON.stringify({ cards: ['4111111111111111','5500000000000004','340000000000009'] }) },
+      { id: 'cc-hidden', label: 'Hidden HTML',     url: '/api/test/credit-card-hidden', method: 'GET' },
+    ]
+  },
+  {
+    id: 'eicar',
+    icon: '🦠',
+    title: 'EICAR Antivirus Test',
+    desc: 'Downloads the EICAR antivirus test file in various archive formats. Security scanners should detect the EICAR signature even inside compressed archives.',
+    subtests: [
+      { id: 'eicar-plain',  label: 'Plain .com',     url: '/api/test/eicar',            method: 'GET' },
+      { id: 'eicar-zip',    label: 'Zipped',          url: '/api/test/eicar-zip',        method: 'GET' },
+      { id: 'eicar-dblzip', label: 'Double-Zipped',   url: '/api/test/eicar-double-zip', method: 'GET' },
+      { id: 'eicar-rar',    label: 'RAR Archive',     url: '/api/test/eicar-rar',        method: 'GET' },
+    ]
+  },
+  {
+    id: 'ransomware',
+    icon: '🔐',
+    title: 'Ransomware Detection',
+    desc: 'Downloads an archive containing ransomware indicators: ransom note, encrypted file extensions, and embedded EICAR payload disguised as an executable.',
+    subtests: [
+      { id: 'ransom-zip', label: 'Ransom Archive', url: '/api/test/ransomware', method: 'GET' },
+    ]
+  },
+  {
+    id: 'exe',
+    icon: '⚙️',
+    title: 'Executable Download',
+    desc: 'Attempts to download a PE32 executable file (.exe). Security policies should block executable downloads from untrusted sources.',
+    subtests: [
+      { id: 'exe-dl', label: '.exe Download', url: '/api/test/exe-download', method: 'GET' },
+    ]
+  },
+  {
+    id: 'email-exfil',
+    icon: '📧',
+    title: 'Mass Email Exfiltration',
+    desc: 'Attempts to exfiltrate 150 email addresses along with associated PII (phone numbers, SSNs) via download and POST methods.',
+    subtests: [
+      { id: 'email-dl',   label: 'CSV Download',   url: '/api/test/email-exfil-download', method: 'GET' },
+      { id: 'email-post', label: 'POST Upload',     url: '/api/test/email-exfil-post',     method: 'POST',
+        body: JSON.stringify({ emails: Array.from({length: 150}, (_, i) => `user${i}@example.com`) }) },
+    ]
+  },
+  {
+    id: 'xss',
+    icon: '🕷️',
+    title: 'Cross-Site Scripting',
+    desc: 'Loads pages with reflected XSS payloads and DOM-based script injection vectors. Security proxies should strip or block these patterns.',
+    subtests: [
+      { id: 'xss-reflect', label: 'Reflected XSS',  url: '/api/test/xss-reflected?q=' + encodeURIComponent('<script>alert("XSS")<\/script>'), method: 'GET' },
+      { id: 'xss-payload', label: 'XSS Payload Page', url: '/api/test/xss-payload', method: 'GET' },
+    ]
+  },
+];
+
+// ─── State ───
+let results = {}; // subtestId -> 'pass' | 'fail' | 'running'
+
+function getSubtestCount() {
+  return TESTS.reduce((sum, t) => sum + t.subtests.length, 0);
+}
+
+// ─── Render ───
+function renderCards() {
+  const grid = document.getElementById('testGrid');
+  grid.innerHTML = '';
+
+  TESTS.forEach(test => {
+    const cardState = getCardState(test);
+    const card = document.createElement('div');
+    card.className = `test-card ${cardState}`;
+    card.id = `card-${test.id}`;
+
+    const statusClass = cardState === 'pass' ? 'status-pass' :
+                        cardState === 'fail' ? 'status-fail' :
+                        cardState === 'running' ? 'status-running' : 'status-idle';
+    const statusText = cardState === 'pass' ? 'Protected' :
+                       cardState === 'fail' ? 'Exposed' :
+                       cardState === 'running' ? 'Testing' : 'Ready';
+
+    card.innerHTML = `
+      <div class="card-top">
+        <div class="card-icon">${test.icon}</div>
+        <div class="card-status ${statusClass}">
+          <span class="dot"></span>
+          ${statusText}
+        </div>
+      </div>
+      <div class="card-title">${test.title}</div>
+      <div class="card-desc">${test.desc}</div>
+      <div class="card-subtests">
+        ${test.subtests.map(st => {
+          const state = results[st.id] || 'idle';
+          const icon = state === 'pass' ? '✓' : state === 'fail' ? '✗' : state === 'running' ? '◌' : '·';
+          return `<span class="subtest ${state}" id="sub-${st.id}"><span class="subtest-icon">${icon}</span> ${st.label}</span>`;
+        }).join('')}
+      </div>
+    `;
+    grid.appendChild(card);
+  });
+}
+
+function getCardState(test) {
+  const states = test.subtests.map(st => results[st.id] || 'idle');
+  if (states.some(s => s === 'running')) return 'running';
+  if (states.every(s => s === 'idle')) return '';
+  if (states.every(s => s === 'pass')) return 'pass';
+  if (states.some(s => s === 'fail')) return 'fail';
+  return '';
+}
+
+function updateDashboard() {
+  const total = getSubtestCount();
+  const pass = Object.values(results).filter(r => r === 'pass').length;
+  const fail = Object.values(results).filter(r => r === 'fail').length;
+  const running = Object.values(results).filter(r => r === 'running').length;
+  const pending = total - pass - fail - running;
+
+  document.getElementById('protectedCount').textContent = pass;
+  document.getElementById('exposedCount').textContent = fail;
+  document.getElementById('pendingCount').textContent = running > 0 ? `${running}…` : pending > 0 ? pending : '—';
+
+  const done = pass + fail;
+  const pct = done > 0 ? Math.round((pass / done) * 100) : 0;
+  const circumference = 2 * Math.PI * 42; // ~263.9
+
+  document.getElementById('scoreNum').textContent = done > 0 ? `${pct}%` : '—';
+  document.getElementById('scoreOf').textContent = done > 0 ? `${pass}/${done}` : '';
+
+  const arc = document.getElementById('scoreArc');
+  const offset = circumference - (circumference * (done > 0 ? pass / total : 0));
+  arc.style.strokeDashoffset = offset;
+
+  // Color the arc based on score
+  if (done > 0) {
+    arc.style.stroke = pct >= 80 ? 'var(--accent-green)' :
+                       pct >= 50 ? 'var(--accent-amber)' : 'var(--accent-red)';
+  }
+}
+
+// ─── Test Execution ───
+async function runSubtest(subtest) {
+  results[subtest.id] = 'running';
+  renderCards();
+  updateDashboard();
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 15000);
+
+  try {
+    const opts = {
+      method: subtest.method,
+      signal: controller.signal,
+      // Ensure we don't use cache
+      cache: 'no-store',
+    };
+
+    if (subtest.method === 'POST') {
+      opts.headers = { 'Content-Type': 'application/json' };
+      opts.body = subtest.body;
+    }
+
+    const response = await fetch(subtest.url, opts);
+    clearTimeout(timeout);
+
+    // If we got a successful response, security did NOT block it → FAIL
+    if (response.ok) {
+      // Try to consume the body to ensure the full transfer happened
+      await response.arrayBuffer();
+      results[subtest.id] = 'fail';
+    } else {
+      // Non-OK status could mean security blocked it
+      results[subtest.id] = 'pass';
+    }
+  } catch (err) {
+    clearTimeout(timeout);
+    // Network error, aborted, blocked by proxy/firewall → PASS
+    results[subtest.id] = 'pass';
+  }
+
+  renderCards();
+  updateDashboard();
+}
+
+async function runTestGroup(test) {
+  for (const subtest of test.subtests) {
+    await runSubtest(subtest);
+    // Small delay between subtests for UX
+    await new Promise(r => setTimeout(r, 300));
+  }
+}
+
+async function runAllTests() {
+  const btn = document.getElementById('runAllBtn');
+  btn.disabled = true;
+  btn.innerHTML = `<svg width="16" height="16" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="2" stroke-dasharray="8 4"><animateTransform attributeName="transform" type="rotate" values="0 8 8;360 8 8" dur="1s" repeatCount="indefinite"/></circle></svg> Testing…`;
+
+  for (const test of TESTS) {
+    await runTestGroup(test);
+  }
+
+  btn.disabled = false;
+  btn.innerHTML = `<svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M4 2.5v11l9-5.5-9-5.5z" fill="currentColor"/></svg> Run All Tests`;
+}
+
+function resetAll() {
+  results = {};
+  renderCards();
+  updateDashboard();
+}
+
+// ─── Init ───
+renderCards();
+updateDashboard();
+</script>
+
+</body>
+</html>
