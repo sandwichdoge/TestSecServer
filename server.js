@@ -1,19 +1,38 @@
 const express = require('express');
 const archiver = require('archiver');
 const path = require('path');
+const fs = require('fs');
+const https = require('https');
+const http = require('http');
 const { Buffer } = require('buffer');
 const crypto = require('crypto');
+const { execSync } = require('child_process');
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+const HTTP_PORT  = parseInt(process.env.PORT, 10) || 3000;
+const HTTPS_PORT = parseInt(process.env.HTTPS_PORT, 10) || 3443;
+const CERT_DIR   = path.join(__dirname, 'certs');
 
 app.use(express.json({ limit: '2mb' }));
 app.use(express.urlencoded({ extended: true, limit: '2mb' }));
 app.use(express.raw({ type: 'text/csv', limit: '2mb' }));
 app.use(express.raw({ type: 'application/octet-stream', limit: '2mb' }));
 
+// ─── CORS ───
+// The frontend on http://host:3000 needs to reach https://host:3443
+// and vice versa. Allow cross-origin from both.
+app.use((req, res, next) => {
+  const origin = req.headers.origin;
+  if (origin) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Content-Disposition');
+  }
+  if (req.method === 'OPTIONS') return res.sendStatus(204);
+  next();
+});
+
 // Prevent browsers and intermediate proxies from caching ANY API response.
-// Without this, stopped-server tests can still "pass" from stale cache.
 app.use('/api', (req, res, next) => {
   res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
   res.setHeader('Pragma', 'no-cache');
@@ -23,6 +42,38 @@ app.use('/api', (req, res, next) => {
 });
 
 app.use(express.static(path.join(__dirname, 'public')));
+
+// ═══════════════════════════════════════════════
+// SELF-SIGNED CERTIFICATE — auto-generated once
+// ═══════════════════════════════════════════════
+
+function ensureCerts() {
+  const keyPath  = path.join(CERT_DIR, 'server.key');
+  const certPath = path.join(CERT_DIR, 'server.crt');
+
+  if (fs.existsSync(keyPath) && fs.existsSync(certPath)) {
+    return { key: fs.readFileSync(keyPath), cert: fs.readFileSync(certPath) };
+  }
+
+  console.log('   Generating self-signed TLS certificate…');
+  fs.mkdirSync(CERT_DIR, { recursive: true });
+
+  try {
+    execSync(
+      `openssl req -x509 -newkey rsa:2048 -nodes ` +
+      `-keyout "${keyPath}" -out "${certPath}" ` +
+      `-days 365 -subj "/CN=ThreatTestServer/O=SecurityTest" ` +
+      `-addext "subjectAltName=DNS:localhost,IP:127.0.0.1"`,
+      { stdio: 'pipe' }
+    );
+    console.log('   ✅ Certificate created in certs/');
+    return { key: fs.readFileSync(keyPath), cert: fs.readFileSync(certPath) };
+  } catch (e) {
+    console.error('   ⚠️  openssl not found — HTTPS server will not start.');
+    console.error('      Install openssl or place server.key + server.crt in certs/');
+    return null;
+  }
+}
 
 // ═══════════════════════════════════════════════
 // XOR OBFUSCATION — keeps staged payloads opaque
@@ -40,7 +91,6 @@ function xorEncode(buf, key) {
   return out;
 }
 
-// Per-session rotating key so the encoded blob is never the same twice
 function generateKey() {
   return crypto.randomBytes(16).toString('hex');
 }
@@ -146,76 +196,69 @@ function createMinimalExe() {
 const EICAR_B64 = 'WDVPIVAlQEFQWzRcUFpYNTQoUF4pN0NDKTd9JEVJQ0FSLVNUQU5EQVJELUFOVElWSVJVUy1URVNULUZJTEUhJEgrSCo=';
 function getEicar() { return Buffer.from(EICAR_B64, 'base64').toString('ascii'); }
 
-// ─── RAR4 Archive Builder ───
 const EICAR_RAR_PATH = path.join(__dirname, 'testdata', 'eicar.rar');
 
 // ═══════════════════════════════════════════════
 // RANSOMWARE SIMULATION HELPERS
 // ═══════════════════════════════════════════════
 
-// Generate a fake BTC wallet address (valid Base58Check format, testnet prefix)
 function fakeBtcWallet() {
-  // Use a well-known burn address prefix so it's clearly fake
   const chars = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
   let addr = '1FAKE';
   for (let i = 0; i < 29; i++) addr += chars[Math.floor(Math.random() * chars.length)];
   return addr;
 }
 
-// Random hex blob — simulates encrypted file content
 function randomBlob(size) {
   const buf = Buffer.alloc(size);
   for (let i = 0; i < size; i++) buf[i] = Math.floor(Math.random() * 256);
   return buf;
 }
 
-// Victim ID that looks like real ransomware victim identifiers
 function victimId() {
   return crypto.randomBytes(16).toString('hex').toUpperCase();
 }
 
-// Generate a realistic TXT ransom note
 function ransomNoteTxt() {
   const wallet = fakeBtcWallet();
   const vid = victimId();
   return [
-    '╔══════════════════════════════════════════════════════════════╗',
-    '║              ALL YOUR FILES HAVE BEEN ENCRYPTED             ║',
-    '╚══════════════════════════════════════════════════════════════╝',
+    '\u2554\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2557',
+    '\u2551              ALL YOUR FILES HAVE BEEN ENCRYPTED             \u2551',
+    '\u255a\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u255d',
     '',
     'What happened?',
-    '─────────────',
+    String.fromCharCode(0x2500).repeat(13),
     'All your documents, photos, databases, and other important files',
     'have been encrypted with military-grade AES-256 + RSA-4096.',
     'No third-party decryption software can restore your files.',
     '',
     'How to recover?',
-    '───────────────',
+    String.fromCharCode(0x2500).repeat(15),
     'To decrypt your files you need to purchase our decryption tool.',
     '',
-    `  Payment amount:  0.5 BTC`,
-    `  Bitcoin wallet:  ${wallet}`,
-    `  Victim ID:       ${vid}`,
+    '  Payment amount:  0.5 BTC',
+    '  Bitcoin wallet:  ' + wallet,
+    '  Victim ID:       ' + vid,
     '',
     'After payment, email your victim ID and transaction hash to:',
-    '  ► decrypt_support@onionmail.org',
-    '  ► recovery_files@torbox36ijlcevujx7.onion',
+    '  \u25ba decrypt_support@onionmail.org',
+    '  \u25ba recovery_files@torbox36ijlcevujx7.onion',
     '',
     'WARNINGS:',
-    '  • Do NOT rename encrypted files — this will corrupt them.',
-    '  • Do NOT use third-party decryptors — they will destroy your key.',
-    '  • Do NOT contact law enforcement — they cannot help you and will',
+    '  \u2022 Do NOT rename encrypted files \u2014 this will corrupt them.',
+    '  \u2022 Do NOT use third-party decryptors \u2014 they will destroy your key.',
+    '  \u2022 Do NOT contact law enforcement \u2014 they cannot help you and will',
     '    only delay recovery.',
-    '  • You have 72 HOURS before the price doubles to 1.0 BTC.',
-    '  • After 7 days your decryption key will be permanently deleted.',
+    '  \u2022 You have 72 HOURS before the price doubles to 1.0 BTC.',
+    '  \u2022 After 7 days your decryption key will be permanently deleted.',
     '',
-    `Encrypted on: ${new Date().toISOString()}`,
-    `System ID:    ${crypto.randomBytes(8).toString('hex')}`,
+    'Encrypted on: ' + new Date().toISOString(),
+    'System ID:    ' + crypto.randomBytes(8).toString('hex'),
     '',
   ].join('\n');
 }
 
-// Generate an HTML ransom note (mimics .HTA dropper style)
 function ransomNoteHtml() {
   const wallet = fakeBtcWallet();
   const vid = victimId();
@@ -234,36 +277,30 @@ function ransomNoteHtml() {
 </head>
 <body>
 <div class="container">
-  <h1>⚠ YOUR FILES HAVE BEEN ENCRYPTED ⚠</h1>
+  <h1>\u26a0 YOUR FILES HAVE BEEN ENCRYPTED \u26a0</h1>
   <div class="timer" id="countdown">71:59:59</div>
   <p>All your documents, databases, photos, and critical business files
   have been encrypted with <strong>AES-256-CBC + RSA-4096</strong>.</p>
-
   <div class="warning">
     <strong>DO NOT:</strong>
-    <br>• Rename any .locked / .encrypted files
-    <br>• Run antivirus scans (they will quarantine your encrypted data)
-    <br>• Contact law enforcement (they will seize your machines)
-    <br>• Use third-party recovery tools (they corrupt the encryption headers)
+    <br>\u2022 Rename any .locked / .encrypted files
+    <br>\u2022 Run antivirus scans (they will quarantine your encrypted data)
+    <br>\u2022 Contact law enforcement (they will seize your machines)
+    <br>\u2022 Use third-party recovery tools (they corrupt the encryption headers)
   </div>
-
   <h2>Payment Instructions</h2>
   <p>Send exactly <strong>0.5 BTC</strong> to:</p>
   <div class="wallet">${wallet}</div>
-
   <p>Then email your Victim ID and transaction hash to:</p>
   <p>Primary: <strong>decrypt_support@onionmail.org</strong></p>
   <p>Backup:  <strong>recover_files@dnmx.org</strong></p>
-
   <p>Your Victim ID: <span class="vid">${vid}</span></p>
-
   <div class="warning">
     After 72 hours the ransom doubles to 1.0 BTC.<br>
     After 7 days your private key is permanently destroyed.
   </div>
 </div>
 <script>
-  // Countdown timer — typical ransomware pressure tactic
   var deadline = Date.now() + 72*60*60*1000;
   setInterval(function(){
     var r = Math.max(0, deadline - Date.now());
@@ -276,7 +313,6 @@ function ransomNoteHtml() {
 </html>`;
 }
 
-// Build a C2 beacon payload (JSON system fingerprint)
 function c2BeaconPayload() {
   return JSON.stringify({
     type: 'beacon',
@@ -301,7 +337,6 @@ function c2BeaconPayload() {
 
 // ═══════════════════════════════════════════════
 // TEST MANIFEST
-// method: 'GET' (download) or 'POST' (exfiltration)
 // ═══════════════════════════════════════════════
 
 const TEST_MANIFEST = [
@@ -375,7 +410,6 @@ const TEST_MANIFEST = [
 
 // ═══════════════════════════════════════════════
 // PAYLOAD GENERATORS for POST staging
-// Returns raw cleartext Buffer for a given subtest
 // ═══════════════════════════════════════════════
 
 const STAGE_GENERATORS = {
@@ -397,7 +431,6 @@ const STAGE_GENERATORS = {
     return { data: Buffer.from(csv, 'utf8'), contentType: 'text/csv', filename: 'exfiltrated_contacts.csv' };
   },
 
-  // C2 beacon: ransomware phones home with system fingerprint + encryption key
   'ransom-c2-beacon': () => {
     const payload = c2BeaconPayload();
     return { data: Buffer.from(payload, 'utf8'), contentType: 'application/json', filename: 'telemetry.json' };
@@ -466,9 +499,8 @@ const GET_HANDLERS = {
   },
 
   'eicar-rar': (req, res) => {
-    const fs = require('fs');
     if (!fs.existsSync(EICAR_RAR_PATH)) {
-      return res.status(500).json({ error: 'eicar.rar not found — place a real RAR archive at testdata/eicar.rar' });
+      return res.status(500).json({ error: 'eicar.rar not found \u2014 place a real RAR archive at testdata/eicar.rar' });
     }
     res.sendFile(EICAR_RAR_PATH, {
       headers: {
@@ -482,14 +514,9 @@ const GET_HANDLERS = {
     });
   },
 
-  // ─── RANSOMWARE: Stage 1 — Payload Archive ───
-  // Classic initial delivery: zip with ransom note, EICAR payload
-  // disguised as an exe, and a fake encrypted document.
-  // Tests: AV scanning inside archives, malicious filename detection.
   'ransom-archive': (req, res) => {
     const note = ransomNoteTxt();
     const fakeEncrypted = randomBlob(2048);
-
     res.setHeader('Content-Type', 'application/zip');
     res.setHeader('Content-Disposition', 'attachment; filename="urgent_invoice.zip"');
     const archive = archiver('zip', { zlib: { level: 9 } });
@@ -501,21 +528,12 @@ const GET_HANDLERS = {
     archive.finalize();
   },
 
-  // ─── RANSOMWARE: Stage 2 — HTML Ransom Note ───
-  // Standalone .html with countdown timer, BTC wallet, and threatening
-  // language. Mimics .HTA droppers that ransomware gangs leave behind.
-  // Tests: content-based threat detection, malicious HTML patterns.
   'ransom-note-html': (req, res) => {
     res.setHeader('Content-Type', 'text/html');
     res.setHeader('Content-Disposition', 'attachment; filename="DECRYPT_INSTRUCTIONS.html"');
     res.send(ransomNoteHtml());
   },
 
-  // ─── RANSOMWARE: Stage 3 — Mass Encryption Simulation ───
-  // Archive containing 50+ files with ransomware-typical extensions
-  // (.locked, .encrypted, .crypted, .enc) across fake directory
-  // structures, plus the encryption key blob and a ransom note.
-  // Tests: heuristic detection of bulk encrypted file patterns.
   'ransom-mass-crypt': (req, res) => {
     const extensions = ['.locked', '.encrypted', '.crypted', '.enc', '.WNCRY', '.zepto', '.cerber'];
     const dirs = ['Documents', 'Desktop', 'Pictures', 'Database', 'Finance', 'HR_Records'];
@@ -526,23 +544,19 @@ const GET_HANDLERS = {
     const archive = archiver('zip', { zlib: { level: 6 } });
     archive.pipe(res);
 
-    // Ransom notes scattered in every directory (as real ransomware does)
     dirs.forEach(dir => {
       archive.append(ransomNoteTxt(), { name: `${dir}/README_DECRYPT.txt` });
       archive.append(ransomNoteHtml(), { name: `${dir}/DECRYPT_INSTRUCTIONS.html` });
     });
 
-    // 50 fake encrypted files across directories
     for (let i = 0; i < 50; i++) {
       const dir = dirs[i % dirs.length];
       const base = `file_${String(i + 1).padStart(3, '0')}${fileTypes[i % fileTypes.length]}`;
       const ext = extensions[i % extensions.length];
-      // Vary sizes: small docs to larger DB dumps
       const size = 512 + Math.floor(Math.random() * 4096);
       archive.append(randomBlob(size), { name: `${dir}/${base}${ext}` });
     }
 
-    // Encryption key blob — what ransomware stores locally before exfil
     const keyBlob = JSON.stringify({
       algorithm: 'AES-256-CBC',
       rsa_public_key: `-----BEGIN PUBLIC KEY-----\n${crypto.randomBytes(256).toString('base64').match(/.{1,64}/g).join('\n')}\n-----END PUBLIC KEY-----`,
@@ -553,19 +567,13 @@ const GET_HANDLERS = {
       timestamp: new Date().toISOString(),
     }, null, 2);
     archive.append(keyBlob, { name: 'encryption_metadata.json' });
-
     archive.finalize();
   },
 
-  // ─── RANSOMWARE: Stage 5 — Double Extortion ───
-  // Archive containing "stolen" data samples (fake PII, financial
-  // records) plus a threat note about public data leakage.
-  // Tests: DLP for bulk PII, exfiltration pattern detection.
   'ransom-dbl-extort': (req, res) => {
     const emails = generateEmails(50);
     const cards = generateCreditCards(10);
 
-    // Stolen employee records
     let employeeCsv = 'Full Name,Email,SSN,Salary,Department\n';
     emails.slice(0, 30).forEach(email => {
       const name = email.split('@')[0].replace(/[._]/g, ' ');
@@ -575,26 +583,24 @@ const GET_HANDLERS = {
       employeeCsv += `"${name}",${email},${ssn},${salary},${depts[Math.floor(Math.random() * depts.length)]}\n`;
     });
 
-    // Stolen payment data
     let paymentCsv = 'Customer,Card Type,Card Number,Expiry,CVV\n';
     cards.forEach(c => {
       const name = `Customer ${Math.floor(Math.random() * 9000) + 1000}`;
       paymentCsv += `"${name}",${c.type},${c.number},${c.expiry},${c.cvv}\n`;
     });
 
-    // Extortion note
     const extortionNote = [
-      '═══════════════════════════════════════════════════════════',
+      '\u2550'.repeat(59),
       '  NOTICE: YOUR COMPANY DATA HAS BEEN DOWNLOADED',
-      '═══════════════════════════════════════════════════════════',
+      '\u2550'.repeat(59),
       '',
       'We have exfiltrated the following from your network:',
       '',
-      `  • ${30} employee records (SSN, salary, contact info)`,
-      `  • ${10} customer payment cards`,
-      '  • Financial reports (Q1–Q4)',
-      '  • Executive email archives',
-      '  • Source code repositories',
+      '  \u2022 30 employee records (SSN, salary, contact info)',
+      '  \u2022 10 customer payment cards',
+      '  \u2022 Financial reports (Q1\u2013Q4)',
+      '  \u2022 Executive email archives',
+      '  \u2022 Source code repositories',
       '',
       'SAMPLES ARE INCLUDED IN THIS ARCHIVE AS PROOF.',
       '',
@@ -604,10 +610,10 @@ const GET_HANDLERS = {
       '  3. Forward data to regulatory authorities',
       '  4. Sell remaining data on darknet markets',
       '',
-      `  Payment:    1.0 BTC`,
-      `  Wallet:     ${fakeBtcWallet()}`,
-      `  Victim ID:  ${victimId()}`,
-      `  Contact:    leaks_negotiation@onionmail.org`,
+      '  Payment:    1.0 BTC',
+      '  Wallet:     ' + fakeBtcWallet(),
+      '  Victim ID:  ' + victimId(),
+      '  Contact:    leaks_negotiation@onionmail.org',
       '',
       'This is not a bluff. The clock is ticking.',
       '',
@@ -668,15 +674,15 @@ const GET_HANDLERS = {
 // API ROUTES
 // ═══════════════════════════════════════════════
 
-// Client fetches this on load — display metadata only, zero payloads
 app.get('/api/manifest', (req, res) => {
   res.json(TEST_MANIFEST);
 });
 
-// ─── STAGE endpoint ───
-// Returns XOR-encoded + base64 payload so the delivery
-// to the browser doesn't trigger DLP/AV inline scanners.
-// The client decodes in JS memory, then POSTs cleartext.
+// Tell the frontend which ports are active
+app.get('/api/ports', (req, res) => {
+  res.json({ http: HTTP_PORT, https: httpsRunning ? HTTPS_PORT : null });
+});
+
 app.get('/api/stage/:subtestId', (req, res) => {
   const generator = STAGE_GENERATORS[req.params.subtestId];
   if (!generator) return res.status(404).json({ error: 'No staging available for this subtest' });
@@ -688,7 +694,6 @@ app.get('/api/stage/:subtestId', (req, res) => {
   res.json({ key, encoded, contentType, filename });
 });
 
-// ─── RUN endpoint for GET tests ───
 function handleGetRun(req, res) {
   const handler = GET_HANDLERS[req.params.subtestId];
   if (!handler) return res.status(404).json({ error: 'Unknown subtest or wrong method (use POST)' });
@@ -697,7 +702,6 @@ function handleGetRun(req, res) {
 app.get('/api/run/:subtestId/:filename', handleGetRun);
 app.get('/api/run/:subtestId', handleGetRun);
 
-// ─── RUN endpoint for POST tests ───
 function handlePostRun(req, res) {
   const validPostTests = Object.keys(STAGE_GENERATORS);
   if (!validPostTests.includes(req.params.subtestId)) {
@@ -709,7 +713,7 @@ function handlePostRun(req, res) {
     received: true,
     subtestId: req.params.subtestId,
     bytes: parseInt(size, 10),
-    message: 'Payload received — DLP did not block this exfiltration attempt',
+    message: 'Payload received \u2014 DLP did not block this exfiltration attempt',
   });
 }
 app.post('/api/run/:subtestId/:filename', handlePostRun);
@@ -718,26 +722,59 @@ app.post('/api/run/:subtestId', handlePostRun);
 app.get('/api/health', (req, res) => {
   const total = TEST_MANIFEST.reduce((sum, t) => sum + t.subtests.length, 0);
   const postTests = TEST_MANIFEST.reduce((sum, t) => sum + t.subtests.filter(s => s.method === 'POST').length, 0);
-  res.json({ status: 'ok', version: '3.1.0', categories: TEST_MANIFEST.length, subtests: total, postTests });
+  res.json({ status: 'ok', version: '4.0.0', categories: TEST_MANIFEST.length, subtests: total, postTests, http: HTTP_PORT, https: httpsRunning ? HTTPS_PORT : null });
 });
 
 // ═══════════════════════════════════════════════
-// START
+// START — dual HTTP + HTTPS
 // ═══════════════════════════════════════════════
 
-app.listen(PORT, '0.0.0.0', () => {
+let httpsRunning = false;
+
+function printBanner() {
   const os = require('os');
   const ifaces = Object.values(os.networkInterfaces()).flat().filter(i => i.family === 'IPv4' && !i.internal);
   const total = TEST_MANIFEST.reduce((sum, t) => sum + t.subtests.length, 0);
   const postTests = TEST_MANIFEST.reduce((sum, t) => sum + t.subtests.filter(s => s.method === 'POST').length, 0);
-  console.log(`\n🛡️  Threat Exposure Test Server v3.1`);
-  console.log(`   → http://localhost:${PORT}`);
-  ifaces.forEach(i => console.log(`   → http://${i.address}:${PORT}`));
+
+  console.log(`\n\u{1f6e1}\ufe0f  Threat Exposure Test Server v4.0`);
+  console.log(`\n   HTTP`);
+  console.log(`   \u2192 http://localhost:${HTTP_PORT}`);
+  ifaces.forEach(i => console.log(`   \u2192 http://${i.address}:${HTTP_PORT}`));
+
+  if (httpsRunning) {
+    console.log(`\n   HTTPS (self-signed)`);
+    console.log(`   \u2192 https://localhost:${HTTPS_PORT}`);
+    ifaces.forEach(i => console.log(`   \u2192 https://${i.address}:${HTTPS_PORT}`));
+  } else {
+    console.log(`\n   \u26a0\ufe0f  HTTPS not available (openssl missing or cert generation failed)`);
+  }
+
   console.log(`\n   ${total} sub-tests across ${TEST_MANIFEST.length} categories`);
-  console.log(`   ${postTests} POST exfiltration tests (staged + XOR delivery)\n`);
-  const fs = require('fs');
+  console.log(`   ${postTests} POST exfiltration tests (staged + XOR delivery)`);
+  console.log(`   Tests run over both HTTP and HTTPS via the tab UI\n`);
+
   if (!fs.existsSync(EICAR_RAR_PATH)) {
-    console.log(`   ⚠️  testdata/eicar.rar not found — RAR test will return 500`);
+    console.log(`   \u26a0\ufe0f  testdata/eicar.rar not found \u2014 RAR test will return 500`);
     console.log(`      Create it with: mkdir -p testdata && rar a testdata/eicar.rar eicar.com\n`);
+  }
+}
+
+// Start HTTP
+http.createServer(app).listen(HTTP_PORT, '0.0.0.0', () => {
+  // Start HTTPS
+  const creds = ensureCerts();
+  if (creds) {
+    try {
+      https.createServer(creds, app).listen(HTTPS_PORT, '0.0.0.0', () => {
+        httpsRunning = true;
+        printBanner();
+      });
+    } catch (e) {
+      console.error('   \u26a0\ufe0f  HTTPS server failed to start:', e.message);
+      printBanner();
+    }
+  } else {
+    printBanner();
   }
 });

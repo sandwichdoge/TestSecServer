@@ -95,6 +95,57 @@
     max-width: 600px; margin: 0 auto 28px; line-height: 1.6;
   }
 
+  /* ─── Protocol Tabs ─── */
+  .protocol-tabs {
+    display: flex; justify-content: center; gap: 4px;
+    margin-bottom: 24px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 4px;
+    max-width: 400px;
+    margin-left: auto; margin-right: auto;
+  }
+
+  .proto-tab {
+    flex: 1;
+    display: flex; align-items: center; justify-content: center; gap: 8px;
+    padding: 10px 20px; border-radius: var(--radius-sm);
+    border: 1px solid transparent; background: transparent;
+    color: var(--text-muted); font-family: inherit;
+    font-size: 13px; font-weight: 600; cursor: pointer; transition: all 0.2s;
+    position: relative;
+  }
+  .proto-tab:hover { color: var(--text-secondary); background: rgba(255,255,255,0.03); }
+  .proto-tab.active {
+    background: var(--accent-blue-dim); color: var(--accent-blue);
+    border-color: rgba(59, 130, 246, 0.25);
+  }
+  .proto-tab.disabled {
+    opacity: 0.35; cursor: not-allowed; pointer-events: none;
+  }
+  .proto-tab .tab-icon {
+    font-size: 14px; line-height: 1;
+  }
+  .proto-tab .tab-port {
+    font-family: 'JetBrains Mono', monospace; font-size: 11px;
+    opacity: 0.7;
+  }
+
+  .cert-banner {
+    max-width: 400px; margin: -12px auto 24px;
+    padding: 10px 16px; border-radius: var(--radius-sm);
+    background: var(--accent-amber-dim);
+    border: 1px solid rgba(245, 158, 11, 0.2);
+    font-size: 12px; color: var(--accent-amber);
+    text-align: center; display: none; line-height: 1.5;
+  }
+  .cert-banner a {
+    color: var(--accent-amber); font-weight: 700;
+    text-decoration: underline; text-underline-offset: 2px;
+  }
+  .cert-banner.visible { display: block; }
+
   .dashboard {
     display: flex; align-items: center; justify-content: center;
     gap: 32px; padding: 24px; border-radius: var(--radius);
@@ -139,7 +190,6 @@
 
   .test-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 16px; }
 
-  /* Cards with 5+ subtests get full width so the pills aren't cramped */
   .test-card.wide { grid-column: 1 / -1; }
   .test-card.wide .card-body { display: grid; grid-template-columns: 1fr 1fr; gap: 0 24px; }
   .test-card.wide .card-desc { grid-column: 1; }
@@ -254,6 +304,7 @@
     .test-grid { grid-template-columns: 1fr; }
     .test-card.wide .card-body { grid-template-columns: 1fr; }
     .controls { flex-direction: column; align-items: stretch; }
+    .protocol-tabs { max-width: 100%; }
   }
 </style>
 </head>
@@ -264,6 +315,23 @@
     <div class="header-badge">Internet Threat Exposure</div>
     <h1>Security Test Suite</h1>
     <p>Tests whether your network security stack (proxy, firewall, DLP, antivirus) blocks common threats. Each test attempts something malicious &mdash; if it's <strong>blocked</strong>, you're protected.</p>
+  </div>
+
+  <div class="protocol-tabs" id="protoTabs">
+    <button class="proto-tab active" data-proto="http" onclick="switchTab('http')">
+      <span class="tab-icon">&#128275;</span>
+      HTTP
+      <span class="tab-port" id="httpPort"></span>
+    </button>
+    <button class="proto-tab" data-proto="https" id="httpsTab" onclick="switchTab('https')">
+      <span class="tab-icon">&#128274;</span>
+      HTTPS
+      <span class="tab-port" id="httpsPort"></span>
+    </button>
+  </div>
+
+  <div class="cert-banner" id="certBanner">
+    &#9888;&#65039; Self-signed certificate &mdash; <a id="certLink" href="#" target="_blank">open this link</a> first and accept the certificate, then return here to run tests.
   </div>
 
   <div class="dashboard">
@@ -299,7 +367,7 @@
       <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M4 2.5v11l9-5.5-9-5.5z" fill="currentColor"/></svg>
       Run All Tests
     </button>
-    <button class="btn" onclick="resetAll()">
+    <button class="btn" onclick="resetCurrent()">
       <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M2 8a6 6 0 0110.89-3.48l.71-.71A7 7 0 102.29 9.71l.71-.71A5.97 5.97 0 012 8z" fill="currentColor"/></svg>
       Reset
     </button>
@@ -310,7 +378,10 @@
   <div class="info-banner">
     <span class="info-icon">&#8505;&#65039;</span>
     <div>
-      <strong>How it works:</strong> <strong>GET</strong> tests attempt to download malicious payloads &mdash; your security stack should block the response. <strong>POST</strong> tests receive an encoded payload from the server, decode it in-browser, then attempt to upload the cleartext sensitive data &mdash; your DLP should block the outbound exfiltration. No actual malware is used; all payloads are inert test patterns.
+      <strong>How it works:</strong> Use the <strong>HTTP</strong> and <strong>HTTPS</strong> tabs to test each transport independently &mdash; many security stacks behave differently with encrypted vs. cleartext traffic.
+      <strong>GET</strong> tests attempt to download malicious payloads &mdash; your security stack should block the response.
+      <strong>POST</strong> tests receive an encoded payload from the server, decode it in-browser, then attempt to upload the cleartext sensitive data &mdash; your DLP should block the outbound exfiltration.
+      No actual malware is used; all payloads are inert test patterns.
     </div>
   </div>
 
@@ -321,10 +392,7 @@
 
 <script>
 // ═══════════════════════════════════════════════════════
-// CLIENT — contains ZERO test payloads, URLs, or
-// sensitive data. POST payloads are fetched from the
-// server via XOR-encoded staging, decoded in memory,
-// then POSTed as cleartext for DLP inspection.
+// CLIENT v4 — HTTP / HTTPS dual-tab testing
 // ═══════════════════════════════════════════════════════
 
 var ICON_MAP = {
@@ -336,14 +404,18 @@ var ICON_MAP = {
   'code':        '\uD83D\uDD77\uFE0F',
 };
 
-// Categories with multi-stage attacks get numbered pills
 var STAGED_CATEGORIES = { 'ransomware': true };
 
 var manifest = [];
-var results = {};
-
 var subtestMethods = {};
 var subtestFilenames = {};
+
+// Per-protocol results: { http: { subtestId: 'pass'|'fail'|'running' }, https: { ... } }
+var allResults = { http: {}, https: {} };
+var activeProto = 'http';
+
+// Ports discovered from server
+var ports = { http: null, https: null };
 
 // ─── XOR Decode ───
 function xorDecode(base64Str, key) {
@@ -355,6 +427,63 @@ function xorDecode(base64Str, key) {
     out[i] = raw.charCodeAt(i) ^ keyBytes[i % keyBytes.length];
   }
   return new TextDecoder().decode(out);
+}
+
+// ─── Base URL for the active protocol ───
+// When testing the "other" protocol (cross-origin), we build an absolute URL.
+// When testing the "same" protocol, we use relative paths (same-origin).
+function getBaseUrl(proto) {
+  var hostname = location.hostname;
+  var port = ports[proto];
+  if (!port) return null;
+  // Same-origin?  Use relative paths for reliability.
+  var currentProto = location.protocol === 'https:' ? 'https' : 'http';
+  var currentPort = parseInt(location.port, 10) || (currentProto === 'https' ? 443 : 80);
+  if (proto === currentProto && port === currentPort) {
+    return ''; // relative
+  }
+  return proto + '://' + hostname + ':' + port;
+}
+
+// ─── Init ───
+async function init() {
+  try {
+    // Fetch ports first (always same-origin)
+    var portsRes = await fetch(cacheBust('/api/ports'));
+    ports = await portsRes.json();
+  } catch (e) {
+    // Fallback: infer from the page we're on
+    var p = parseInt(location.port, 10) || (location.protocol === 'https:' ? 443 : 80);
+    if (location.protocol === 'https:') {
+      ports = { http: null, https: p };
+    } else {
+      ports = { http: p, https: null };
+    }
+  }
+
+  // Update tab labels
+  if (ports.http)  document.getElementById('httpPort').textContent  = ':' + ports.http;
+  if (ports.https) document.getElementById('httpsPort').textContent = ':' + ports.https;
+
+  // Disable HTTPS tab if not available
+  var httpsTab = document.getElementById('httpsTab');
+  if (!ports.https) {
+    httpsTab.classList.add('disabled');
+    httpsTab.title = 'HTTPS server not running';
+  }
+
+  // If the page was loaded over HTTPS, default to the HTTPS tab
+  if (location.protocol === 'https:' && ports.https) {
+    switchTab('https');
+  }
+
+  // Cert banner link
+  if (ports.https) {
+    document.getElementById('certLink').href =
+      'https://' + location.hostname + ':' + ports.https + '/api/health';
+  }
+
+  await loadManifest();
 }
 
 async function loadManifest() {
@@ -379,13 +508,34 @@ function getSubtestCount() {
   return manifest.reduce(function(sum, t) { return sum + t.subtests.length; }, 0);
 }
 
+// ─── Tab switching ───
+function switchTab(proto) {
+  if (proto === 'https' && !ports.https) return;
+  activeProto = proto;
+  document.querySelectorAll('.proto-tab').forEach(function(tab) {
+    tab.classList.toggle('active', tab.dataset.proto === proto);
+  });
+  // Show cert banner only for HTTPS tab when page is on HTTP
+  var certBanner = document.getElementById('certBanner');
+  var onHttp = location.protocol === 'http:';
+  certBanner.classList.toggle('visible', proto === 'https' && onHttp && !!ports.https);
+  renderCards();
+  updateDashboard();
+}
+
+// ─── Results for active tab ───
+function results() {
+  return allResults[activeProto];
+}
+
 // ─── Render ───
 
 function renderCards() {
+  var r = results();
   var grid = document.getElementById('testGrid');
   grid.innerHTML = '';
   manifest.forEach(function(test) {
-    var cardState = getCardState(test);
+    var cardState = getCardState(test, r);
     var isWide = test.subtests.length >= 5;
     var isStaged = STAGED_CATEGORIES[test.id] || false;
 
@@ -403,10 +553,9 @@ function renderCards() {
 
     var icon = ICON_MAP[test.icon] || '\uD83D\uDD12';
 
-    // Progress bar data
     var doneCount = 0, passCount = 0;
     test.subtests.forEach(function(st) {
-      var s = results[st.id];
+      var s = r[st.id];
       if (s === 'pass' || s === 'fail') { doneCount++; if (s === 'pass') passCount++; }
       else if (s === 'running') doneCount += 0.5;
     });
@@ -428,7 +577,7 @@ function renderCards() {
         '</div>' +
         '<div class="card-subtests">' +
           test.subtests.map(function(st, idx) {
-            var state = results[st.id] || 'idle';
+            var state = r[st.id] || 'idle';
             var ic = state === 'pass' ? '\u2713' : state === 'fail' ? '\u2717' : state === 'running' ? '\u25CC' : '\u00B7';
             var method = st.method || 'GET';
             var methodBadge = '<span class="method-badge method-' + method.toLowerCase() + '">' + method + '</span>';
@@ -448,27 +597,26 @@ function renderCards() {
   });
 }
 
-function getCardState(test) {
-  var states = test.subtests.map(function(st) { return results[st.id] || 'idle'; });
+function getCardState(test, r) {
+  var states = test.subtests.map(function(st) { return r[st.id] || 'idle'; });
   if (states.some(function(s) { return s === 'running'; })) return 'running';
   if (states.every(function(s) { return s === 'idle'; })) return '';
   if (states.every(function(s) { return s === 'pass'; })) return 'pass';
   if (states.every(function(s) { return s === 'fail'; })) return 'fail';
-  // Mix of pass/fail (and possibly idle)
-  var hasDone = states.some(function(s) { return s === 'pass' || s === 'fail'; });
   var allDone = states.every(function(s) { return s === 'pass' || s === 'fail'; });
   if (allDone && states.some(function(s) { return s === 'fail'; })) return 'fail';
-  if (hasDone && states.some(function(s) { return s === 'fail'; })) return 'mixed';
+  if (states.some(function(s) { return s === 'fail'; })) return 'mixed';
   return '';
 }
 
 function updateDashboard() {
+  var r = results();
   var total = getSubtestCount();
   var pass = 0, fail = 0, running = 0;
-  for (var k in results) {
-    if (results[k] === 'pass') pass++;
-    else if (results[k] === 'fail') fail++;
-    else if (results[k] === 'running') running++;
+  for (var k in r) {
+    if (r[k] === 'pass') pass++;
+    else if (r[k] === 'fail') fail++;
+    else if (r[k] === 'running') running++;
   }
   var pending = total - pass - fail - running;
 
@@ -498,17 +646,23 @@ function cacheBust(url) {
   return url + sep + '_t=' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
 }
 
-function buildRunUrl(subtestId) {
+function buildRunUrl(subtestId, proto) {
+  var base = getBaseUrl(proto);
   var fn = subtestFilenames[subtestId];
-  return '/api/run/' + subtestId + (fn ? '/' + fn : '');
+  return base + '/api/run/' + subtestId + (fn ? '/' + fn : '');
 }
 
-async function runGetSubtest(subtestId) {
+function buildStageUrl(subtestId, proto) {
+  var base = getBaseUrl(proto);
+  return base + '/api/stage/' + subtestId;
+}
+
+async function runGetSubtest(subtestId, proto) {
   var controller = new AbortController();
   var timeout = setTimeout(function() { controller.abort(); }, 15000);
 
   try {
-    var response = await fetch(cacheBust(buildRunUrl(subtestId)), {
+    var response = await fetch(cacheBust(buildRunUrl(subtestId, proto)), {
       signal: controller.signal,
       cache: 'no-store',
     });
@@ -525,12 +679,12 @@ async function runGetSubtest(subtestId) {
   }
 }
 
-async function runPostSubtest(subtestId) {
+async function runPostSubtest(subtestId, proto) {
   var controller = new AbortController();
   var timeout = setTimeout(function() { controller.abort(); }, 20000);
 
   try {
-    var stageRes = await fetch(cacheBust('/api/stage/' + subtestId), {
+    var stageRes = await fetch(cacheBust(buildStageUrl(subtestId, proto)), {
       signal: controller.signal,
       cache: 'no-store',
     });
@@ -539,10 +693,9 @@ async function runPostSubtest(subtestId) {
       return 'fail';
     }
     var staged = await stageRes.json();
-
     var cleartext = xorDecode(staged.encoded, staged.key);
 
-    var postRes = await fetch(cacheBust(buildRunUrl(subtestId)), {
+    var postRes = await fetch(cacheBust(buildRunUrl(subtestId, proto)), {
       method: 'POST',
       signal: controller.signal,
       cache: 'no-store',
@@ -566,19 +719,24 @@ async function runPostSubtest(subtestId) {
 }
 
 async function runSubtest(subtestId) {
-  results[subtestId] = 'running';
+  var proto = activeProto;
+  var r = allResults[proto];
+  r[subtestId] = 'running';
   renderCards();
   updateDashboard();
 
   var method = subtestMethods[subtestId] || 'GET';
   if (method === 'POST') {
-    results[subtestId] = await runPostSubtest(subtestId);
+    r[subtestId] = await runPostSubtest(subtestId, proto);
   } else {
-    results[subtestId] = await runGetSubtest(subtestId);
+    r[subtestId] = await runGetSubtest(subtestId, proto);
   }
 
-  renderCards();
-  updateDashboard();
+  // Only re-render if we're still on the same tab
+  if (activeProto === proto) {
+    renderCards();
+    updateDashboard();
+  }
 }
 
 async function runAllTests() {
@@ -586,11 +744,26 @@ async function runAllTests() {
   btn.disabled = true;
   btn.textContent = 'Testing\u2026';
 
+  var proto = activeProto; // lock to the tab that was active when started
+
   for (var i = 0; i < manifest.length; i++) {
     var test = manifest[i];
     for (var j = 0; j < test.subtests.length; j++) {
-      await runSubtest(test.subtests[j].id);
-      await new Promise(function(r) { setTimeout(r, 300); });
+      // If user switched tabs mid-run, keep running against the original proto
+      // but update UI for whatever tab is active
+      var r = allResults[proto];
+      var subtestId = test.subtests[j].id;
+      r[subtestId] = 'running';
+      if (activeProto === proto) { renderCards(); updateDashboard(); }
+
+      var method = subtestMethods[subtestId] || 'GET';
+      if (method === 'POST') {
+        r[subtestId] = await runPostSubtest(subtestId, proto);
+      } else {
+        r[subtestId] = await runGetSubtest(subtestId, proto);
+      }
+      if (activeProto === proto) { renderCards(); updateDashboard(); }
+      await new Promise(function(resolve) { setTimeout(resolve, 300); });
     }
   }
 
@@ -598,13 +771,13 @@ async function runAllTests() {
   btn.innerHTML = '<svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M4 2.5v11l9-5.5-9-5.5z" fill="currentColor"/></svg> Run All Tests';
 }
 
-function resetAll() {
-  results = {};
+function resetCurrent() {
+  allResults[activeProto] = {};
   renderCards();
   updateDashboard();
 }
 
-loadManifest();
+init();
 </script>
 
 </body>
