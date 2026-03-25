@@ -394,19 +394,21 @@ app.get('/api/stage/:subtestId', (req, res) => {
 });
 
 // ─── RUN endpoint for GET tests ───
-// Route accepts optional trailing filename so the URL looks like
-// /api/run/eicar-rar/eicar.rar — many firewalls use the URL file
-// extension to decide which content scanner to engage.
-app.get('/api/run/:subtestId/:filename?', (req, res) => {
+// Two routes: with and without trailing filename. The filename variant
+// (e.g. /api/run/eicar-rar/eicar.rar) lets firewalls that inspect the
+// URL file extension decide which content scanner to engage.
+function handleGetRun(req, res) {
   const handler = GET_HANDLERS[req.params.subtestId];
   if (!handler) return res.status(404).json({ error: 'Unknown subtest or wrong method (use POST)' });
   handler(req, res);
-});
+}
+app.get('/api/run/:subtestId/:filename', handleGetRun);
+app.get('/api/run/:subtestId', handleGetRun);
 
 // ─── RUN endpoint for POST tests ───
 // Expects cleartext payload in the request body.
 // If the DLP/proxy lets this through, the test FAILS.
-app.post('/api/run/:subtestId/:filename?', (req, res) => {
+function handlePostRun(req, res) {
   const validPostTests = Object.keys(STAGE_GENERATORS);
   if (!validPostTests.includes(req.params.subtestId)) {
     return res.status(404).json({ error: 'Unknown POST subtest' });
@@ -420,7 +422,9 @@ app.post('/api/run/:subtestId/:filename?', (req, res) => {
     bytes: parseInt(size, 10),
     message: 'Payload received — DLP did not block this exfiltration attempt',
   });
-});
+}
+app.post('/api/run/:subtestId/:filename', handlePostRun);
+app.post('/api/run/:subtestId', handlePostRun);
 
 app.get('/api/health', (req, res) => {
   const total = TEST_MANIFEST.reduce((sum, t) => sum + t.subtests.length, 0);
