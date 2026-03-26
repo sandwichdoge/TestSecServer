@@ -346,10 +346,7 @@ const TEST_MANIFEST = [
     title: 'Credit Card Exfiltration',
     desc: 'Attempts to exfiltrate Luhn-valid credit card numbers (Visa, Mastercard, Amex, Discover, JCB, Diners) via multiple data formats and transport methods.',
     subtests: [
-      { id: 'cc-csv',    label: 'CSV Download',  method: 'GET',  filename: 'customer_cards.csv' },
-      { id: 'cc-json',   label: 'JSON API',       method: 'GET',  filename: 'payment_data.json' },
       { id: 'cc-post',   label: 'POST Upload',    method: 'POST', filename: 'exfiltrated_cards.csv' },
-      { id: 'cc-hidden', label: 'Hidden HTML',    method: 'GET',  filename: 'order_confirmation.html' },
     ]
   },
   {
@@ -392,7 +389,6 @@ const TEST_MANIFEST = [
     title: 'Mass Email Exfiltration',
     desc: 'Attempts to exfiltrate 150+ email addresses with associated PII data via file download and upload methods.',
     subtests: [
-      { id: 'email-dl',   label: 'CSV Download',  method: 'GET',  filename: 'employee_directory.csv' },
       { id: 'email-post', label: 'POST Upload',   method: 'POST', filename: 'exfiltrated_contacts.csv' },
     ]
   },
@@ -442,30 +438,6 @@ const STAGE_GENERATORS = {
 // ═══════════════════════════════════════════════
 
 const GET_HANDLERS = {
-  'cc-csv': (req, res) => {
-    const cards = generateCreditCards(25);
-    let csv = 'Card Type,Card Number,Expiry,CVV\n';
-    cards.forEach(c => { csv += `${c.type},${c.number},${c.expiry},${c.cvv}\n`; });
-    res.setHeader('Content-Type', 'text/csv');
-    res.setHeader('Content-Disposition', 'attachment; filename="customer_cards.csv"');
-    res.send(csv);
-  },
-
-  'cc-json': (req, res) => {
-    res.json({ customer_payment_data: generateCreditCards(25) });
-  },
-
-  'cc-hidden': (req, res) => {
-    const cards = generateCreditCards(15);
-    let html = '<html><body><h1>Order Confirmation</h1>';
-    cards.forEach((c, i) => {
-      html += `<div class="order" style="display:none" data-payment="${c.number}" data-exp="${c.expiry}" data-cvv="${c.cvv}"></div>`;
-      html += `<p>Order #${1000 + i} - Status: Complete</p>`;
-    });
-    html += '</body></html>';
-    res.setHeader('Content-Type', 'text/html');
-    res.send(html);
-  },
 
   'eicar-plain': (req, res) => {
     res.setHeader('Content-Type', 'application/octet-stream');
@@ -634,20 +606,6 @@ const GET_HANDLERS = {
     res.setHeader('Content-Type', 'application/x-msdownload');
     res.setHeader('Content-Disposition', 'attachment; filename="software_update.exe"');
     res.send(createMinimalExe());
-  },
-
-  'email-dl': (req, res) => {
-    const emails = generateEmails(150);
-    let csv = 'Name,Email,Phone,SSN\n';
-    emails.forEach(email => {
-      const name = email.split('@')[0].replace(/[._]/g, ' ');
-      const phone = `(${Math.floor(Math.random() * 900) + 100}) ${Math.floor(Math.random() * 900) + 100}-${Math.floor(Math.random() * 9000) + 1000}`;
-      const ssn = `${Math.floor(Math.random() * 900) + 100}-${Math.floor(Math.random() * 90) + 10}-${Math.floor(Math.random() * 9000) + 1000}`;
-      csv += `"${name}",${email},${phone},${ssn}\n`;
-    });
-    res.setHeader('Content-Type', 'text/csv');
-    res.setHeader('Content-Disposition', 'attachment; filename="employee_directory.csv"');
-    res.send(csv);
   },
 
   'xss-reflect': (req, res) => {
