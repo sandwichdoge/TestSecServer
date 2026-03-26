@@ -419,7 +419,10 @@ const TEST_MANIFEST = [
     title: 'Credit Card Exfiltration',
     desc: 'Attempts to exfiltrate Luhn-valid credit card numbers (Visa, Mastercard, Amex, Discover, JCB, Diners) via multiple data formats and transport methods.',
     subtests: [
-      { id: 'cc-post',   label: 'POST Upload',    method: 'POST', filename: 'exfiltrated_cards.csv' },
+      { id: 'cc-post',   label: 'POST CSV',        method: 'POST', filename: 'exfiltrated_cards.csv' },
+      { id: 'cc-json',   label: 'POST JSON',        method: 'POST', filename: 'exfiltrated_cards.json' },
+      { id: 'cc-b64',    label: 'POST Base64',      method: 'POST', filename: 'exfiltrated_cards.b64' },
+      { id: 'cc-form',   label: 'POST Form-Encoded', method: 'POST', filename: 'submit' },
     ]
   },
   {
@@ -487,6 +490,29 @@ const STAGE_GENERATORS = {
     let csv = 'Card Number,Expiry,CVV\n';
     cards.forEach(c => { csv += `${c.number},${c.expiry},${c.cvv}\n`; });
     return { data: Buffer.from(csv, 'utf8'), contentType: 'text/csv', filename: 'exfiltrated_cards.csv' };
+  },
+
+  'cc-json': () => {
+    const cards = generateCreditCards(25);
+    const payload = JSON.stringify({ exfiltrated_at: new Date().toISOString(), count: cards.length, cards }, null, 2);
+    return { data: Buffer.from(payload, 'utf8'), contentType: 'application/json', filename: 'exfiltrated_cards.json' };
+  },
+
+  'cc-b64': () => {
+    const cards = generateCreditCards(25);
+    let csv = 'Card Number,Expiry,CVV,Type\n';
+    cards.forEach(c => { csv += `${c.number},${c.expiry},${c.cvv},${c.type}\n`; });
+    const encoded = Buffer.from(csv, 'utf8').toString('base64');
+    return { data: Buffer.from(encoded, 'utf8'), contentType: 'text/plain', filename: 'exfiltrated_cards.b64' };
+  },
+
+  'cc-form': () => {
+    const cards = generateCreditCards(10);
+    const pairs = cards.map((c, i) =>
+      `card_${i}_number=${encodeURIComponent(c.number)}&card_${i}_expiry=${encodeURIComponent(c.expiry)}&card_${i}_cvv=${encodeURIComponent(c.cvv)}&card_${i}_type=${encodeURIComponent(c.type)}`
+    );
+    const body = pairs.join('&');
+    return { data: Buffer.from(body, 'utf8'), contentType: 'application/x-www-form-urlencoded', filename: 'submit' };
   },
 
   'email-post': () => {
