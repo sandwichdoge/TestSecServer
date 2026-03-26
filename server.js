@@ -423,6 +423,10 @@ const TEST_MANIFEST = [
       { id: 'cc-json',   label: 'POST JSON',        method: 'POST', filename: 'exfiltrated_cards.json' },
       { id: 'cc-b64',    label: 'POST Base64',      method: 'POST', filename: 'exfiltrated_cards.b64' },
       { id: 'cc-form',   label: 'POST Form-Encoded', method: 'POST', filename: 'submit' },
+      { id: 'cc-sql',    label: 'SQL Dump',           method: 'POST', filename: 'cards_dump.sql' },
+      { id: 'cc-jsonl',  label: 'JSON Lines',          method: 'POST', filename: 'cards.jsonl' },
+      { id: 'cc-tsv',    label: 'TSV Export',          method: 'POST', filename: 'cards_export.tsv' },
+      { id: 'cc-xml',    label: 'XML Result Set',      method: 'POST', filename: 'cards_query.xml' },
     ]
   },
   {
@@ -513,6 +517,62 @@ const STAGE_GENERATORS = {
     );
     const body = pairs.join('&');
     return { data: Buffer.from(body, 'utf8'), contentType: 'application/x-www-form-urlencoded', filename: 'submit' };
+  },
+
+  'cc-sql': () => {
+    const cards = generateCreditCards(25);
+    const ts = new Date().toISOString().replace('T', ' ').slice(0, 19);
+    const rows = cards.map((c, i) =>
+      `(${i + 1001}, '${c.number}', '${c.expiry}', '${c.cvv}', '${c.type}', '${ts}')`
+    ).join(',\n');
+    const sql = [
+      `-- Exfiltrated payment_cards table`,
+      `-- Host: db-prod-01.internal  Database: payments  Generated: ${ts}`,
+      ``,
+      `CREATE TABLE IF NOT EXISTS \`payment_cards\` (`,
+      `  \`id\` int(11) NOT NULL,`,
+      `  \`card_number\` varchar(19) NOT NULL,`,
+      `  \`expiry\` varchar(5) NOT NULL,`,
+      `  \`cvv\` varchar(4) NOT NULL,`,
+      `  \`card_type\` varchar(16) NOT NULL,`,
+      `  \`created_at\` datetime NOT NULL`,
+      `);`,
+      ``,
+      `INSERT INTO \`payment_cards\` (\`id\`, \`card_number\`, \`expiry\`, \`cvv\`, \`card_type\`, \`created_at\`) VALUES`,
+      rows + ';',
+    ].join('\n');
+    return { data: Buffer.from(sql, 'utf8'), contentType: 'application/sql', filename: 'cards_dump.sql' };
+  },
+
+  'cc-jsonl': () => {
+    const cards = generateCreditCards(25);
+    const lines = cards.map((c, i) =>
+      JSON.stringify({ id: i + 1001, card_number: c.number, expiry: c.expiry, cvv: c.cvv, card_type: c.type, created_at: new Date().toISOString() })
+    ).join('\n');
+    return { data: Buffer.from(lines, 'utf8'), contentType: 'application/x-ndjson', filename: 'cards.jsonl' };
+  },
+
+  'cc-tsv': () => {
+    const cards = generateCreditCards(25);
+    let tsv = 'id\tcard_number\texpiry\tcvv\tcard_type\tcreated_at\n';
+    cards.forEach((c, i) => { tsv += `${i + 1001}\t${c.number}\t${c.expiry}\t${c.cvv}\t${c.type}\t${new Date().toISOString()}\n`; });
+    return { data: Buffer.from(tsv, 'utf8'), contentType: 'text/tab-separated-values', filename: 'cards_export.tsv' };
+  },
+
+  'cc-xml': () => {
+    const cards = generateCreditCards(25);
+    const rows = cards.map((c, i) => [
+      `  <row>`,
+      `    <id>${i + 1001}</id>`,
+      `    <card_number>${c.number}</card_number>`,
+      `    <expiry>${c.expiry}</expiry>`,
+      `    <cvv>${c.cvv}</cvv>`,
+      `    <card_type>${c.type}</card_type>`,
+      `    <created_at>${new Date().toISOString()}</created_at>`,
+      `  </row>`,
+    ].join('\n')).join('\n');
+    const xml = `<?xml version="1.0" encoding="UTF-8"?>\n<resultset table="payment_cards" rows="${cards.length}">\n${rows}\n</resultset>\n`;
+    return { data: Buffer.from(xml, 'utf8'), contentType: 'application/xml', filename: 'cards_query.xml' };
   },
 
   'email-post': () => {
