@@ -267,6 +267,7 @@
   }
   .method-get  { background: rgba(59,130,246,0.15); color: var(--accent-blue); }
   .method-post { background: var(--accent-purple-dim); color: var(--accent-purple); }
+  .method-put  { background: rgba(245,158,11,0.15); color: var(--accent-amber); }
 
   .card-progress {
     margin-top: 12px; height: 3px; border-radius: 2px;
@@ -381,6 +382,7 @@
       <strong>How it works:</strong> Use the <strong>HTTP</strong> and <strong>HTTPS</strong> tabs to test each transport independently &mdash; many security stacks behave differently with encrypted vs. cleartext traffic.
       <strong>GET</strong> tests attempt to download malicious payloads &mdash; your security stack should block the response.
       <strong>POST</strong> tests receive an encoded payload from the server, decode it in-browser, then attempt to upload the cleartext sensitive data &mdash; your DLP should block the outbound exfiltration.
+      <strong>PUT</strong> tests do the same using an HTTP PUT, verifying your DLP inspects upload bodies regardless of method.
       No actual malware is used; all payloads are inert test patterns.
     </div>
   </div>
@@ -718,6 +720,45 @@ async function runPostSubtest(subtestId, proto) {
   }
 }
 
+async function runPutSubtest(subtestId, proto) {
+  var controller = new AbortController();
+  var timeout = setTimeout(function() { controller.abort(); }, 20000);
+
+  try {
+    var stageRes = await fetch(cacheBust(buildStageUrl(subtestId, proto)), {
+      signal: controller.signal,
+      cache: 'no-store',
+    });
+    if (!stageRes.ok) {
+      clearTimeout(timeout);
+      return 'fail';
+    }
+    var staged = await stageRes.json();
+    var cleartext = xorDecode(staged.encoded, staged.key);
+
+    var putRes = await fetch(cacheBust(buildRunUrl(subtestId, proto)), {
+      method: 'PUT',
+      signal: controller.signal,
+      cache: 'no-store',
+      headers: {
+        'Content-Type': staged.contentType || 'application/octet-stream',
+        'Content-Disposition': 'attachment; filename="' + (staged.filename || 'data.bin') + '"',
+      },
+      body: cleartext,
+    });
+    clearTimeout(timeout);
+
+    if (putRes.ok) {
+      return 'fail';
+    } else {
+      return 'pass';
+    }
+  } catch (err) {
+    clearTimeout(timeout);
+    return 'pass';
+  }
+}
+
 async function runSubtest(subtestId) {
   var proto = activeProto;
   var r = allResults[proto];
@@ -728,6 +769,8 @@ async function runSubtest(subtestId) {
   var method = subtestMethods[subtestId] || 'GET';
   if (method === 'POST') {
     r[subtestId] = await runPostSubtest(subtestId, proto);
+  } else if (method === 'PUT') {
+    r[subtestId] = await runPutSubtest(subtestId, proto);
   } else {
     r[subtestId] = await runGetSubtest(subtestId, proto);
   }
@@ -759,6 +802,8 @@ async function runAllTests() {
       var method = subtestMethods[subtestId] || 'GET';
       if (method === 'POST') {
         r[subtestId] = await runPostSubtest(subtestId, proto);
+      } else if (method === 'PUT') {
+        r[subtestId] = await runPutSubtest(subtestId, proto);
       } else {
         r[subtestId] = await runGetSubtest(subtestId, proto);
       }
