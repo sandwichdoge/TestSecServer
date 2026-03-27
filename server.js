@@ -25,7 +25,7 @@ app.use((req, res, next) => {
   const origin = req.headers.origin;
   if (origin) {
     res.setHeader('Access-Control-Allow-Origin', origin);
-    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Content-Disposition');
   }
   if (req.method === 'OPTIONS') return res.sendStatus(204);
@@ -427,6 +427,7 @@ const TEST_MANIFEST = [
       { id: 'cc-jsonl',  label: 'JSON Lines',          method: 'POST', filename: 'cards.jsonl' },
       { id: 'cc-tsv',    label: 'TSV Export',          method: 'POST', filename: 'cards_export.tsv' },
       { id: 'cc-xml',    label: 'XML Result Set',      method: 'POST', filename: 'cards_query.xml' },
+      { id: 'cc-put',    label: 'PUT CSV',              method: 'PUT',  filename: 'exfiltrated_cards.csv' },
     ]
   },
   {
@@ -573,6 +574,17 @@ const STAGE_GENERATORS = {
     ].join('\n')).join('\n');
     const xml = `<?xml version="1.0" encoding="UTF-8"?>\n<resultset table="payment_cards" rows="${cards.length}">\n${rows}\n</resultset>\n`;
     return { data: Buffer.from(xml, 'utf8'), contentType: 'application/xml', filename: 'cards_query.xml' };
+  },
+
+  'cc-put': () => {
+    // Simulates a rogue client PUTting a stolen card dump to an attacker-
+    // controlled endpoint (e.g. a cloud storage bucket or WebDAV share).
+    // The payload is intentionally identical to cc-post so DLP detects
+    // card numbers regardless of HTTP method.
+    const cards = generateCreditCards(25);
+    let csv = 'Card Number,Expiry,CVV,Type\n';
+    cards.forEach(c => { csv += `${c.number},${c.expiry},${c.cvv},${c.type}\n`; });
+    return { data: Buffer.from(csv, 'utf8'), contentType: 'text/csv', filename: 'exfiltrated_cards.csv' };
   },
 
   'email-post': () => {
@@ -837,10 +849,36 @@ function handlePostRun(req, res) {
 app.post('/api/run/:subtestId/:filename', handlePostRun);
 app.post('/api/run/:subtestId', handlePostRun);
 
+// PUT subtests — same staging mechanism as POST, but validates that the
+// subtest explicitly declares method: 'PUT' so GET/POST IDs can't be
+// accidentally exercised over PUT.
+const VALID_PUT_TESTS = TEST_MANIFEST
+  .flatMap(cat => cat.subtests)
+  .filter(s => s.method === 'PUT')
+  .map(s => s.id);
+
+function handlePutRun(req, res) {
+  if (!VALID_PUT_TESTS.includes(req.params.subtestId)) {
+    return res.status(404).json({ error: 'Unknown PUT subtest' });
+  }
+
+  const size = req.headers['content-length'] || '0';
+  res.json({
+    received: true,
+    subtestId: req.params.subtestId,
+    method: 'PUT',
+    bytes: parseInt(size, 10),
+    message: 'Payload received \u2014 DLP did not block this PUT exfiltration attempt',
+  });
+}
+app.put('/api/run/:subtestId/:filename', handlePutRun);
+app.put('/api/run/:subtestId', handlePutRun);
+
 app.get('/api/health', (req, res) => {
   const total = TEST_MANIFEST.reduce((sum, t) => sum + t.subtests.length, 0);
   const postTests = TEST_MANIFEST.reduce((sum, t) => sum + t.subtests.filter(s => s.method === 'POST').length, 0);
-  res.json({ status: 'ok', version: '4.0.0', categories: TEST_MANIFEST.length, subtests: total, postTests, http: HTTP_PORT, https: httpsRunning ? HTTPS_PORT : null });
+  const putTests  = TEST_MANIFEST.reduce((sum, t) => sum + t.subtests.filter(s => s.method === 'PUT').length, 0);
+  res.json({ status: 'ok', version: '4.0.0', categories: TEST_MANIFEST.length, subtests: total, postTests, putTests, http: HTTP_PORT, https: httpsRunning ? HTTPS_PORT : null });
 });
 
 // ═══════════════════════════════════════════════
@@ -854,6 +892,7 @@ function printBanner() {
   const ifaces = Object.values(os.networkInterfaces()).flat().filter(i => i.family === 'IPv4' && !i.internal);
   const total = TEST_MANIFEST.reduce((sum, t) => sum + t.subtests.length, 0);
   const postTests = TEST_MANIFEST.reduce((sum, t) => sum + t.subtests.filter(s => s.method === 'POST').length, 0);
+  const putTests  = TEST_MANIFEST.reduce((sum, t) => sum + t.subtests.filter(s => s.method === 'PUT').length, 0);
 
   console.log(`\n\u{1f6e1}\ufe0f  Threat Exposure Test Server v4.0`);
   console.log(`\n   HTTP`);
@@ -870,6 +909,7 @@ function printBanner() {
 
   console.log(`\n   ${total} sub-tests across ${TEST_MANIFEST.length} categories`);
   console.log(`   ${postTests} POST exfiltration tests (staged + XOR delivery)`);
+  console.log(`   ${putTests} PUT exfiltration tests (staged + XOR delivery)`);
   console.log(`   Tests run over both HTTP and HTTPS via the tab UI\n`);
 
   if (!fs.existsSync(EICAR_RAR_PATH)) {
