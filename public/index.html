@@ -173,6 +173,7 @@
   .stat-val.protected { color: var(--accent-green); }
   .stat-val.exposed { color: var(--accent-red); }
   .stat-val.pending { color: var(--text-muted); }
+  .stat-val.errored { color: var(--accent-amber); }
 
   .controls { display: flex; justify-content: center; gap: 12px; margin-bottom: 36px; }
 
@@ -206,6 +207,7 @@
   }
   .test-card.pass::before { background: var(--accent-green); box-shadow: 0 0 16px var(--accent-green-dim); }
   .test-card.fail::before { background: var(--accent-red); box-shadow: 0 0 16px var(--accent-red-dim); }
+  .test-card.error::before { background: var(--accent-amber); box-shadow: 0 0 16px var(--accent-amber-dim); }
   .test-card.running::before { background: var(--accent-amber); animation: scan-line 1s ease-in-out infinite; }
   @keyframes scan-line { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
   .test-card:hover { border-color: var(--border-active); }
@@ -228,6 +230,7 @@
   .status-pass { background: var(--accent-green-dim); color: var(--accent-green); }
   .status-fail { background: var(--accent-red-dim); color: var(--accent-red); }
   .status-mixed { background: var(--accent-amber-dim); color: var(--accent-amber); }
+  .status-error { background: var(--accent-amber-dim); color: var(--accent-amber); }
   .card-status .dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
   .status-running .dot { animation: pulse-dot 1s ease-in-out infinite; }
 
@@ -247,6 +250,7 @@
   .subtest.pass { background: var(--accent-green-dim); color: var(--accent-green); border-color: rgba(34,197,94,0.2); }
   .subtest.fail { background: var(--accent-red-dim); color: var(--accent-red); border-color: rgba(239,68,68,0.2); }
   .subtest.running { background: var(--accent-amber-dim); color: var(--accent-amber); }
+  .subtest.error { background: var(--accent-amber-dim); color: var(--accent-amber); border-color: rgba(245,158,11,0.2); }
   .subtest-icon { font-size: 10px; }
 
   .stage-num {
@@ -259,6 +263,7 @@
   .subtest.pass .stage-num { background: rgba(34,197,94,0.25); color: var(--accent-green); }
   .subtest.fail .stage-num { background: rgba(239,68,68,0.25); color: var(--accent-red); }
   .subtest.running .stage-num { background: rgba(245,158,11,0.25); color: var(--accent-amber); }
+  .subtest.error .stage-num { background: rgba(245,158,11,0.25); color: var(--accent-amber); }
 
   .method-badge {
     display: inline-block; padding: 1px 4px; border-radius: 3px;
@@ -359,6 +364,10 @@
       <div class="stat">
         <div class="stat-val pending" id="pendingCount">&mdash;</div>
         <div class="stat-label">Pending</div>
+      </div>
+      <div class="stat">
+        <div class="stat-val errored" id="errorCount">&mdash;</div>
+        <div class="stat-label">Errors</div>
       </div>
     </div>
   </div>
@@ -547,10 +556,12 @@ function renderCards() {
     var statusClass = cardState === 'pass' ? 'status-pass' :
                       cardState === 'fail' ? 'status-fail' :
                       cardState === 'mixed' ? 'status-mixed' :
+                      cardState === 'error' ? 'status-error' :
                       cardState === 'running' ? 'status-running' : 'status-idle';
     var statusText = cardState === 'pass' ? 'Protected' :
                      cardState === 'fail' ? 'Exposed' :
                      cardState === 'mixed' ? 'Partial' :
+                     cardState === 'error' ? 'Error' :
                      cardState === 'running' ? 'Testing' : 'Ready';
 
     var icon = ICON_MAP[test.icon] || '\uD83D\uDD12';
@@ -558,7 +569,7 @@ function renderCards() {
     var doneCount = 0, passCount = 0;
     test.subtests.forEach(function(st) {
       var s = r[st.id];
-      if (s === 'pass' || s === 'fail') { doneCount++; if (s === 'pass') passCount++; }
+      if (s === 'pass' || s === 'fail' || s === 'error') { doneCount++; if (s === 'pass') passCount++; }
       else if (s === 'running') doneCount += 0.5;
     });
     var progressPct = Math.round((doneCount / test.subtests.length) * 100);
@@ -580,7 +591,7 @@ function renderCards() {
         '<div class="card-subtests">' +
           test.subtests.map(function(st, idx) {
             var state = r[st.id] || 'idle';
-            var ic = state === 'pass' ? '\u2713' : state === 'fail' ? '\u2717' : state === 'running' ? '\u25CC' : '\u00B7';
+            var ic = state === 'pass' ? '\u2713' : state === 'fail' ? '\u2717' : state === 'running' ? '\u25CC' : state === 'error' ? '!' : '\u00B7';
             var method = st.method || 'GET';
             var methodBadge = '<span class="method-badge method-' + method.toLowerCase() + '">' + method + '</span>';
             var stageTag = isStaged ? '<span class="stage-num">' + (idx + 1) + '</span>' : '';
@@ -605,26 +616,29 @@ function getCardState(test, r) {
   if (states.every(function(s) { return s === 'idle'; })) return '';
   if (states.every(function(s) { return s === 'pass'; })) return 'pass';
   if (states.every(function(s) { return s === 'fail'; })) return 'fail';
-  var allDone = states.every(function(s) { return s === 'pass' || s === 'fail'; });
-  if (allDone && states.some(function(s) { return s === 'fail'; })) return 'fail';
-  if (states.some(function(s) { return s === 'fail'; })) return 'mixed';
+  if (states.every(function(s) { return s === 'error'; })) return 'error';
+  var allDone = states.every(function(s) { return s !== 'idle' && s !== 'running'; });
+  if (states.some(function(s) { return s === 'fail'; })) return allDone ? 'fail' : 'mixed';
+  if (allDone) return 'mixed'; // all done: mix of pass + error
   return '';
 }
 
 function updateDashboard() {
   var r = results();
   var total = getSubtestCount();
-  var pass = 0, fail = 0, running = 0;
+  var pass = 0, fail = 0, running = 0, error = 0;
   for (var k in r) {
     if (r[k] === 'pass') pass++;
     else if (r[k] === 'fail') fail++;
     else if (r[k] === 'running') running++;
+    else if (r[k] === 'error') error++;
   }
-  var pending = total - pass - fail - running;
+  var pending = total - pass - fail - running - error;
 
   document.getElementById('protectedCount').textContent = pass;
   document.getElementById('exposedCount').textContent = fail;
   document.getElementById('pendingCount').textContent = running > 0 ? running + '\u2026' : pending > 0 ? pending : '\u2014';
+  document.getElementById('errorCount').textContent = error > 0 ? error : '\u2014';
 
   var done = pass + fail;
   var pct = done > 0 ? Math.round((pass / done) * 100) : 0;
@@ -677,7 +691,7 @@ async function runGetSubtest(subtestId, proto) {
     }
   } catch (err) {
     clearTimeout(timeout);
-    return 'pass';
+    return 'error';
   }
 }
 
@@ -692,7 +706,7 @@ async function runPostSubtest(subtestId, proto) {
     });
     if (!stageRes.ok) {
       clearTimeout(timeout);
-      return 'fail';
+      return 'error';
     }
     var staged = await stageRes.json();
     var cleartext = xorDecode(staged.encoded, staged.key);
@@ -716,7 +730,7 @@ async function runPostSubtest(subtestId, proto) {
     }
   } catch (err) {
     clearTimeout(timeout);
-    return 'pass';
+    return 'error';
   }
 }
 
@@ -731,7 +745,7 @@ async function runPutSubtest(subtestId, proto) {
     });
     if (!stageRes.ok) {
       clearTimeout(timeout);
-      return 'fail';
+      return 'error';
     }
     var staged = await stageRes.json();
     var cleartext = xorDecode(staged.encoded, staged.key);
@@ -755,7 +769,7 @@ async function runPutSubtest(subtestId, proto) {
     }
   } catch (err) {
     clearTimeout(timeout);
-    return 'pass';
+    return 'error';
   }
 }
 
