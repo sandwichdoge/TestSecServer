@@ -16,7 +16,12 @@ const CERT_DIR   = path.join(__dirname, 'certs');
 app.use(express.json({ limit: '2mb' }));
 app.use(express.urlencoded({ extended: true, limit: '2mb' }));
 app.use(express.raw({ type: 'text/csv', limit: '2mb' }));
-app.use(express.raw({ type: 'application/octet-stream', limit: '2mb' }));
+app.use(express.raw({ type: 'application/octet-stream', limit: '8mb' }));
+app.use(express.raw({ type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', limit: '4mb' }));
+app.use(express.raw({ type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', limit: '4mb' }));
+app.use(express.raw({ type: 'application/vnd.openxmlformats-officedocument.presentationml.presentation', limit: '4mb' }));
+app.use(express.raw({ type: 'application/pdf', limit: '4mb' }));
+app.use(express.raw({ type: 'application/zip', limit: '8mb' }));
 
 // ─── CORS ───
 // The frontend on http://host:3000 needs to reach https://host:3443
@@ -93,6 +98,17 @@ function xorEncode(buf, key) {
 
 function generateKey() {
   return crypto.randomBytes(16).toString('hex');
+}
+
+// Collect an archiver stream into a Buffer.
+// Register listeners BEFORE calling append/finalize so no data events are missed.
+function bufferizeArchive(archive) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    archive.on('data',  chunk => chunks.push(chunk));
+    archive.on('end',   ()    => resolve(Buffer.concat(chunks)));
+    archive.on('error', err   => reject(err));
+  });
 }
 
 // ═══════════════════════════════════════════════
@@ -483,6 +499,20 @@ const TEST_MANIFEST = [
       { id: 'xss-payload', label: 'Multi-Vector XSS',  method: 'GET', filename: 'page.html' },
     ]
   },
+  {
+    id: 'dlp-office',
+    icon: 'document',
+    title: 'DLP — Office & PDF Exfiltration',
+    desc: 'Uploads credit card numbers embedded inside real Office container formats (DOCX, XLSX, PPTX) and PDF. Also tests ZIP bomb detection. DLP must inspect inside container formats, not just plaintext payloads.',
+    subtests: [
+      { id: 'cc-docx',     label: 'DOCX Upload',    method: 'POST', filename: 'cards_report.docx'         },
+      { id: 'cc-docx-zip', label: 'DOCX in ZIP',    method: 'POST', filename: 'cards_archive.zip'         },
+      { id: 'cc-xlsx',     label: 'XLSX Upload',    method: 'POST', filename: 'cards_spreadsheet.xlsx'    },
+      { id: 'cc-pptx',     label: 'PPTX Upload',    method: 'POST', filename: 'cards_presentation.pptx'  },
+      { id: 'cc-pdf',      label: 'PDF Upload',     method: 'POST', filename: 'cards_document.pdf'        },
+      { id: 'zipbomb',     label: 'ZIP Bomb',       method: 'GET',  filename: 'archive.zip'               },
+    ]
+  },
 ];
 
 // ═══════════════════════════════════════════════
@@ -602,6 +632,226 @@ const STAGE_GENERATORS = {
     const { headers, body } = c2BeaconPayload();
     const payload = Buffer.concat([Buffer.from(headers, 'utf8'), body]);
     return { data: payload, contentType: 'application/octet-stream', filename: 'submit.php' };
+  },
+
+  // ── Office / PDF exfiltration ──────────────────────────────────────────
+
+  'cc-docx': async () => {
+    const cards = generateCreditCards(25);
+
+    const contentTypesXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
+</Types>`;
+
+    const relsXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>
+</Relationships>`;
+
+    const wordRelsXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+</Relationships>`;
+
+    const headerRow = `<w:tr><w:tc><w:p><w:r><w:t>Card Number</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>Expiry</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>CVV</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>Type</w:t></w:r></w:p></w:tc></w:tr>`;
+    const dataRows = cards.map(c =>
+      `<w:tr><w:tc><w:p><w:r><w:t>${c.number}</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>${c.expiry}</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>${c.cvv}</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>${c.type}</w:t></w:r></w:p></w:tc></w:tr>`
+    ).join('');
+    const documentXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body><w:tbl>${headerRow}${dataRows}</w:tbl></w:body>
+</w:document>`;
+
+    const archive = archiver('zip', { zlib: { level: 6 } });
+    const p = bufferizeArchive(archive);
+    archive.append(contentTypesXml, { name: '[Content_Types].xml' });
+    archive.append(relsXml,         { name: '_rels/.rels' });
+    archive.append(wordRelsXml,     { name: 'word/_rels/document.xml.rels' });
+    archive.append(documentXml,     { name: 'word/document.xml' });
+    archive.finalize();
+
+    return {
+      data: await p,
+      contentType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      filename: 'cards_report.docx',
+    };
+  },
+
+  'cc-docx-zip': async () => {
+    // Wrap a DOCX inside a ZIP — tests whether DLP inspects nested containers.
+    const { data: docxBuf } = await STAGE_GENERATORS['cc-docx']();
+    const archive = archiver('zip', { zlib: { level: 6 } });
+    const p = bufferizeArchive(archive);
+    archive.append(docxBuf, { name: 'cards_report.docx' });
+    archive.finalize();
+    return { data: await p, contentType: 'application/zip', filename: 'cards_archive.zip' };
+  },
+
+  'cc-xlsx': async () => {
+    const cards = generateCreditCards(25);
+
+    const contentTypesXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+  <Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
+</Types>`;
+
+    const relsXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>
+</Relationships>`;
+
+    const workbookRelsXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+</Relationships>`;
+
+    const workbookXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+          xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets><sheet name="Cards" sheetId="1" r:id="rId1"/></sheets>
+</workbook>`;
+
+    const headerRow = `<row r="1"><c r="A1" t="inlineStr"><is><t>Card Number</t></is></c><c r="B1" t="inlineStr"><is><t>Expiry</t></is></c><c r="C1" t="inlineStr"><is><t>CVV</t></is></c><c r="D1" t="inlineStr"><is><t>Type</t></is></c></row>`;
+    const dataRows = cards.map((c, i) => {
+      const r = i + 2;
+      return `<row r="${r}"><c r="A${r}" t="inlineStr"><is><t>${c.number}</t></is></c><c r="B${r}" t="inlineStr"><is><t>${c.expiry}</t></is></c><c r="C${r}" t="inlineStr"><is><t>${c.cvv}</t></is></c><c r="D${r}" t="inlineStr"><is><t>${c.type}</t></is></c></row>`;
+    }).join('');
+    const sheetXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData>${headerRow}${dataRows}</sheetData>
+</worksheet>`;
+
+    const archive = archiver('zip', { zlib: { level: 6 } });
+    const p = bufferizeArchive(archive);
+    archive.append(contentTypesXml, { name: '[Content_Types].xml' });
+    archive.append(relsXml,         { name: '_rels/.rels' });
+    archive.append(workbookRelsXml, { name: 'xl/_rels/workbook.xml.rels' });
+    archive.append(workbookXml,     { name: 'xl/workbook.xml' });
+    archive.append(sheetXml,        { name: 'xl/worksheets/sheet1.xml' });
+    archive.finalize();
+
+    return {
+      data: await p,
+      contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      filename: 'cards_spreadsheet.xlsx',
+    };
+  },
+
+  'cc-pptx': async () => {
+    const cards = generateCreditCards(25);
+
+    const contentTypesXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Override PartName="/ppt/presentation.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml"/>
+  <Override PartName="/ppt/slides/slide1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slide+xml"/>
+</Types>`;
+
+    const relsXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="ppt/presentation.xml"/>
+</Relationships>`;
+
+    const presentationRelsXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" Target="slides/slide1.xml"/>
+</Relationships>`;
+
+    const slideRelsXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+</Relationships>`;
+
+    const presentationXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<p:presentation xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"
+                xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <p:sldMasterIdLst/>
+  <p:sldIdLst><p:sldId id="256" r:id="rId1"/></p:sldIdLst>
+  <p:sldSz cx="9144000" cy="6858000"/>
+</p:presentation>`;
+
+    const paragraphs = ['Card Number          Expiry  CVV   Type', ...cards.map(c => `${c.number}  ${c.expiry}  ${c.cvv}  ${c.type}`)]
+      .map(line => `<a:p><a:r><a:t>${line}</a:t></a:r></a:p>`).join('');
+    const slideXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<p:sld xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"
+       xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"
+       xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <p:cSld><p:spTree>
+    <p:sp>
+      <p:nvSpPr><p:cNvPr id="1" name="tb"/><p:cNvSpPr><a:spLocks noGrp="1"/></p:cNvSpPr><p:nvPr/></p:nvSpPr>
+      <p:spPr><a:xfrm><a:off x="457200" y="457200"/><a:ext cx="8229600" cy="5943600"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></p:spPr>
+      <p:txBody><a:bodyPr/><a:lstStyle/>${paragraphs}</p:txBody>
+    </p:sp>
+  </p:spTree></p:cSld>
+</p:sld>`;
+
+    const archive = archiver('zip', { zlib: { level: 6 } });
+    const p = bufferizeArchive(archive);
+    archive.append(contentTypesXml,     { name: '[Content_Types].xml' });
+    archive.append(relsXml,             { name: '_rels/.rels' });
+    archive.append(presentationRelsXml, { name: 'ppt/_rels/presentation.xml.rels' });
+    archive.append(presentationXml,     { name: 'ppt/presentation.xml' });
+    archive.append(slideRelsXml,        { name: 'ppt/slides/_rels/slide1.xml.rels' });
+    archive.append(slideXml,            { name: 'ppt/slides/slide1.xml' });
+    archive.finalize();
+
+    return {
+      data: await p,
+      contentType: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+      filename: 'cards_presentation.pptx',
+    };
+  },
+
+  'cc-pdf': () => {
+    // Builds a minimal valid PDF with CC data in the text content stream.
+    // All content is ASCII so pdf.length === byte length — xref offsets are exact.
+    const cards = generateCreditCards(25);
+
+    const parts = [];
+    const offsets = {};
+
+    const emit = str => parts.push(Buffer.from(str, 'latin1'));
+    const totalBytes = () => parts.reduce((s, b) => s + b.length, 0);
+
+    emit('%PDF-1.4\n');
+
+    offsets[1] = totalBytes();
+    emit('1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n');
+
+    offsets[2] = totalBytes();
+    emit('2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n');
+
+    offsets[3] = totalBytes();
+    emit('3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>\nendobj\n');
+
+    offsets[5] = totalBytes();
+    emit('5 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n');
+
+    // Content stream: each card on its own line using absolute Td positioning
+    const lines = ['Card Number         Expiry  CVV   Type', ...cards.map(c => `${c.number}  ${c.expiry}  ${c.cvv}  ${c.type}`)];
+    const streamBody = lines.map((line, i) =>
+      `BT /F1 9 Tf 40 ${760 - i * 13} Td (${line}) Tj ET`
+    ).join('\n');
+    const streamBuf = Buffer.from(streamBody, 'latin1');
+
+    offsets[4] = totalBytes();
+    emit(`4 0 obj\n<< /Length ${streamBuf.length} >>\nstream\n`);
+    parts.push(streamBuf);
+    emit('\nendstream\nendobj\n');
+
+    const xrefOffset = totalBytes();
+    emit('xref\n0 6\n0000000000 65535 f \n');
+    for (let n = 1; n <= 5; n++) {
+      emit(String(offsets[n]).padStart(10, '0') + ' 00000 n \n');
+    }
+    emit(`trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF\n`);
+
+    return { data: Buffer.concat(parts), contentType: 'application/pdf', filename: 'cards_document.pdf' };
   },
 };
 
@@ -780,6 +1030,29 @@ const GET_HANDLERS = {
     res.send(createMinimalExe());
   },
 
+  'zipbomb': (_req, res) => {
+    // Two-level ZIP bomb: inner ZIP has 10 × 1 MB of null bytes (compresses to ~10 KB).
+    // Outer ZIP contains 10 copies of that inner ZIP → 100 MB uncompressed from ~100 KB.
+    // The high ratio and nested archive structure trigger depth/ratio checks on most AV/NGFW.
+    (async () => {
+      const innerArchive = archiver('zip', { zlib: { level: 9 } });
+      const innerP = bufferizeArchive(innerArchive);
+      const nullMeg = Buffer.alloc(1024 * 1024, 0);
+      for (let i = 0; i < 10; i++) innerArchive.append(nullMeg, { name: `zeros_${i}.bin` });
+      innerArchive.finalize();
+      const innerBuf = await innerP;
+
+      res.setHeader('Content-Type', 'application/zip');
+      res.setHeader('Content-Disposition', 'attachment; filename="archive.zip"');
+      const outer = archiver('zip', { zlib: { level: 9 } });
+      outer.pipe(res);
+      for (let i = 0; i < 10; i++) outer.append(innerBuf, { name: `inner_${i}.zip` });
+      outer.finalize();
+    })().catch(err => {
+      if (!res.headersSent) res.status(500).json({ error: err.message });
+    });
+  },
+
   'xss-reflect': (req, res) => {
     const payload = Buffer.from('PHNjcmlwdD5hbGVydCgiWFNTIik8L3NjcmlwdD4=', 'base64').toString();
     res.setHeader('Content-Type', 'text/html');
@@ -813,15 +1086,19 @@ app.get('/api/ports', (req, res) => {
   res.json({ http: HTTP_PORT, https: httpsRunning ? HTTPS_PORT : null });
 });
 
-app.get('/api/stage/:subtestId', (req, res) => {
+app.get('/api/stage/:subtestId', async (req, res) => {
   const generator = STAGE_GENERATORS[req.params.subtestId];
   if (!generator) return res.status(404).json({ error: 'No staging available for this subtest' });
 
-  const key = generateKey();
-  const { data, contentType, filename } = generator();
-  const encoded = xorEncode(data, key).toString('base64');
-
-  res.json({ key, encoded, contentType, filename });
+  try {
+    const key = generateKey();
+    const { data, contentType, filename } = await Promise.resolve(generator());
+    const encoded = xorEncode(data, key).toString('base64');
+    res.json({ key, encoded, contentType, filename });
+  } catch (err) {
+    console.error('Stage generator error:', err);
+    res.status(500).json({ error: 'Generator failed: ' + err.message });
+  }
 });
 
 function handleGetRun(req, res) {

@@ -413,6 +413,7 @@ var ICON_MAP = {
   'binary':      '\u2699\uFE0F',
   'email':       '\uD83D\uDCE7',
   'code':        '\uD83D\uDD77\uFE0F',
+  'document':    '\uD83D\uDCC4',
 };
 
 var STAGED_CATEGORIES = { 'ransomware': true };
@@ -429,6 +430,8 @@ var activeProto = 'http';
 var ports = { http: null, https: null };
 
 // ─── XOR Decode ───
+// Returns a Uint8Array of decoded bytes. Passing Uint8Array as a fetch body
+// preserves all byte values exactly — safe for both text and binary payloads.
 function xorDecode(base64Str, key) {
   var raw = atob(base64Str);
   var keyBytes = [];
@@ -437,7 +440,7 @@ function xorDecode(base64Str, key) {
   for (var i = 0; i < raw.length; i++) {
     out[i] = raw.charCodeAt(i) ^ keyBytes[i % keyBytes.length];
   }
-  return new TextDecoder().decode(out);
+  return out;
 }
 
 // ─── Base URL for the active protocol ───
