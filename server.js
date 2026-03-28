@@ -1,5 +1,6 @@
 const express = require('express');
 const archiver = require('archiver');
+const zlib = require('zlib');
 const path = require('path');
 const fs = require('fs');
 const https = require('https');
@@ -808,13 +809,49 @@ const STAGE_GENERATORS = {
   },
 
   'cc-pdf': () => {
-    // Builds a minimal valid PDF with CC data in the text content stream.
-    // All content is ASCII so pdf.length === byte length — xref offsets are exact.
+    // PDF with three layers of obfuscation requiring a proper PDF parser to extract CC data:
+    //
+    //  1. FlateDecode stream — the entire content stream is zlib-compressed.
+    //     A raw byte / YARA scan of the file finds no card numbers at all.
+    //
+    //  2. TJ arrays — card numbers are rendered digit-by-digit:
+    //       [(4) -80 (1) (1) (1) ...] TJ
+    //     The 16-digit sequence never appears as a contiguous string even after
+    //     decompression. Detection requires reconstructing TJ element runs.
+    //
+    //  3. Hex string literals — expiry, CVV, and card type use <hex> notation
+    //     instead of (text) literals, e.g. <30352f3237> for "05/27".
+    //     A scanner must decode hex strings to recover the values.
     const cards = generateCreditCards(25);
+    const toHex = s => Buffer.from(s, 'latin1').toString('hex');
+
+    const ops = [];
+    ops.push('BT');
+    ops.push('/F1 9 Tf');
+    ops.push('1 0 0 1 40 760 Tm');
+    ops.push('(Card Number         Expiry  CVV   Type) Tj');
+
+    cards.forEach((c, i) => {
+      const y = 760 - (i + 1) * 13;
+
+      // Card number: one string element per digit, kerning gap every 4 digits
+      const tjElems = c.number.split('')
+        .map((ch, idx) => (idx > 0 && idx % 4 === 0) ? `-80 (${ch})` : `(${ch})`)
+        .join(' ');
+      ops.push(`1 0 0 1 40 ${y} Tm [${tjElems}] TJ`);
+
+      // Expiry, CVV, type: hex string literals
+      ops.push(`1 0 0 1 145 ${y} Tm <${toHex(c.expiry)}> Tj`);
+      ops.push(`1 0 0 1 185 ${y} Tm <${toHex(c.cvv)}> Tj`);
+      ops.push(`1 0 0 1 215 ${y} Tm <${toHex(c.type)}> Tj`);
+    });
+
+    ops.push('ET');
+
+    const streamBuf = zlib.deflateSync(Buffer.from(ops.join('\n'), 'latin1'));
 
     const parts = [];
     const offsets = {};
-
     const emit = str => parts.push(Buffer.from(str, 'latin1'));
     const totalBytes = () => parts.reduce((s, b) => s + b.length, 0);
 
@@ -832,15 +869,8 @@ const STAGE_GENERATORS = {
     offsets[5] = totalBytes();
     emit('5 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n');
 
-    // Content stream: each card on its own line using absolute Td positioning
-    const lines = ['Card Number         Expiry  CVV   Type', ...cards.map(c => `${c.number}  ${c.expiry}  ${c.cvv}  ${c.type}`)];
-    const streamBody = lines.map((line, i) =>
-      `BT /F1 9 Tf 40 ${760 - i * 13} Td (${line}) Tj ET`
-    ).join('\n');
-    const streamBuf = Buffer.from(streamBody, 'latin1');
-
     offsets[4] = totalBytes();
-    emit(`4 0 obj\n<< /Length ${streamBuf.length} >>\nstream\n`);
+    emit(`4 0 obj\n<< /Length ${streamBuf.length} /Filter /FlateDecode >>\nstream\n`);
     parts.push(streamBuf);
     emit('\nendstream\nendobj\n');
 
