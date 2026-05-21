@@ -1236,12 +1236,12 @@ function printBanner() {
 }
 
 // Start HTTP
-http.createServer(app).listen(HTTP_PORT, '0.0.0.0', () => {
+http.createServer(app).listen(HTTP_PORT, '127.0.0.1', () => {
   // Start HTTPS
   const creds = ensureCerts();
   if (creds) {
     try {
-      https.createServer(creds, app).listen(HTTPS_PORT, '0.0.0.0', () => {
+      https.createServer(creds, app).listen(HTTPS_PORT, '127.0.0.1', () => {
         httpsRunning = true;
         printBanner();
       });
